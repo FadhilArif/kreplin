@@ -1,136 +1,28 @@
 (() => {
   'use strict';
 
-    /*
-   * ============================================================
-   * APPS SCRIPT CALLBACK
-   * ============================================================
-   *
-   * Apps Script mengarahkan iframe kembali ke GitHub Pages
-   * dengan response di URL fragment:
-   *
-   * #api_cb=BASE64_DATA
-   *
-   * Karena callback sekarang berasal dari GitHub Pages sendiri,
-   * iframe menjadi same-origin dengan halaman utama sehingga
-   * postMessage dapat dikirim dengan stabil.
-   * ============================================================
-   */
-
-  function handleApiCallback() {
-    const hash = window.location.hash || '';
-
-    if (!hash.startsWith('#api_cb=')) {
-      return false;
-    }
-
-    try {
-      const encoded = decodeURIComponent(
-        hash.slice('#api_cb='.length)
-      );
-
-      /*
-       * Base64 URL-safe -> Base64 normal
-       */
-      let base64 = encoded
-        .replace(/-/g, '+')
-        .replace(/_/g, '/');
-
-      while (base64.length % 4 !== 0) {
-        base64 += '=';
-      }
-
-      const binary = window.atob(base64);
-
-      const bytes = new Uint8Array(
-        binary.length
-      );
-
-      for (
-        let i = 0;
-        i < binary.length;
-        i += 1
-      ) {
-        bytes[i] = binary.charCodeAt(i);
-      }
-
-      const json = new TextDecoder(
-        'utf-8'
-      ).decode(bytes);
-
-      const message = JSON.parse(json);
-
-      /*
-       * Kirim response ke halaman utama.
-       */
-      if (
-        window.parent &&
-        window.parent !== window
-      ) {
-        window.parent.postMessage(
-          message,
-          'https://fadhilarif.github.io'
-        );
-      }
-
-      /*
-       * Hapus fragment agar tidak mengganggu
-       * history browser.
-       */
-      window.history.replaceState(
-        null,
-        document.title,
-        window.location.pathname +
-          window.location.search
-      );
-
-      return true;
-    } catch (error) {
-      console.error(
-        'API callback error:',
-        error
-      );
-
-      return true;
-    }
-  }
-
-  /*
-   * Kalau file ini sedang dijalankan di iframe
-   * sebagai callback API, jangan boot aplikasi penuh.
-   */
-  if (
-    window !== window.top &&
-    handleApiCallback()
-  ) {
-    return;
-  }
-
-  /*
-   * ============================================================
-   * KRAEPELIN PRACTICE - FRONTEND APPLICATION
-   * ============================================================
-   *
-   * Struktur tes:
-   * - 50 kolom
-   * - 26 soal per kolom
-   * - 15 detik per kolom
-   * - 27 digit per kolom -> 26 pasangan penjumlahan
-   *
-   * Backend:
-   * Google Apps Script Web App
-   *
-   * Penyimpanan:
-   * - Session login       -> localStorage
-   * - Active test         -> localStorage
-   * - History hasil tes   -> Google Sheets melalui Apps Script
-   *
-   * Catatan:
-   * Active test tetap tersimpan ketika refresh.
-   * Active test DIHAPUS ketika user sengaja mengakhiri tes
-   * menggunakan tombol Home dan mengonfirmasi.
-   * ============================================================
-   */
+  // ============================================================
+  // KRAEPELIN PRACTICE - FINAL APP.JS
+  // ============================================================
+  //
+  // Struktur:
+  // - 50 kolom
+  // - 26 soal per kolom
+  // - 15 detik per kolom
+  // - 27 digit per kolom -> 26 pasangan penjumlahan
+  //
+  // Backend:
+  // Google Apps Script + Google Sheets
+  //
+  // API:
+  // POST -> hidden iframe
+  // GET  -> JSONP polling
+  //
+  // Active test:
+  // - refresh browser = progress tetap ada
+  // - Home + konfirmasi = progress hangus
+  // - selesai tes = active test dihapus
+  // ============================================================
 
   const CONFIG = Object.freeze({
     COLUMNS: 50,
@@ -138,17 +30,32 @@
     DIGITS_PER_COLUMN: 27,
     SECONDS_PER_COLUMN: 15,
 
-    STORAGE_KEY: 'kraepelin_active_test_v4',
-    SESSION_KEY: 'kraepelin_session_v2',
+    STORAGE_KEY: 'kraepelin_active_test_v5',
+    SESSION_KEY: 'kraepelin_session_v5',
 
     API_URL:
       'https://script.google.com/macros/s/AKfycbwtcJdN60aa3sbe-CGyqGSj72g7AH47dNJySyNk41pS_3Q7e-M03wfQSumNxItNgP_-yw/exec'
   });
 
-  /* ============================================================
-   * STATE
-   * ============================================================
-   */
+  // ============================================================
+  // DOM
+  // ============================================================
+
+  const $ = (id) => document.getElementById(id);
+
+  const views = {
+    landing: $('landingView'),
+    auth: $('authView'),
+    dashboard: $('dashboardView'),
+    instruction: $('instructionView'),
+    test: $('testView'),
+    result: $('resultView'),
+    history: $('historyView')
+  };
+
+  // ============================================================
+  // STATE
+  // ============================================================
 
   const state = {
     session: null,
@@ -176,27 +83,11 @@
     savingHistory: false
   };
 
-  /* ============================================================
-   * DOM HELPERS
-   * ============================================================
-   */
+  let apiFrame = null;
 
-  const $ = (id) => document.getElementById(id);
-
-  const views = {
-    landing: $('landingView'),
-    auth: $('authView'),
-    dashboard: $('dashboardView'),
-    instruction: $('instructionView'),
-    test: $('testView'),
-    result: $('resultView'),
-    history: $('historyView')
-  };
-
-  /* ============================================================
-   * VIEW MANAGEMENT
-   * ============================================================
-   */
+  // ============================================================
+  // VIEW
+  // ============================================================
 
   function showView(name) {
     Object.values(views).forEach((view) => {
@@ -215,342 +106,17 @@
       stopTimer();
     }
 
-    if (name === 'test') {
-      document.body.scrollTop = 0;
-      document.documentElement.scrollTop = 0;
-    }
-
     window.scrollTo(0, 0);
   }
 
-  /* ============================================================
-   * API STATUS
-   * ============================================================
-   */
-
-  function setApiStatus() {
-    document.querySelectorAll('[data-api-status]').forEach((el) => {
-      el.textContent =
-        'Backend Google Sheets aktif melalui Google Apps Script.';
-      el.dataset.ready = 'true';
-    });
-  }
-
-  /* ============================================================
-   * RANDOM NUMBER
-   * ============================================================
-   */
-
-  function secureRandomInt(max) {
-    if (
-      window.crypto &&
-      typeof window.crypto.getRandomValues === 'function'
-    ) {
-      const maxUint = 0x100000000;
-      const limit = Math.floor(maxUint / max) * max;
-
-      const buffer = new Uint32Array(1);
-
-      do {
-        window.crypto.getRandomValues(buffer);
-      } while (buffer[0] >= limit);
-
-      return buffer[0] % max;
-    }
-
-    return Math.floor(Math.random() * max);
-  }
-
-  function randomDigit() {
-    return secureRandomInt(10);
-  }
-
-  function createRandomColumn() {
-    return Array.from(
-      { length: CONFIG.DIGITS_PER_COLUMN },
-      randomDigit
-    );
-  }
-
-  /* ============================================================
-   * SESSION
-   * ============================================================
-   */
-
-  function persistSession() {
-    if (!state.session) {
-      localStorage.removeItem(CONFIG.SESSION_KEY);
-      return;
-    }
-
-    try {
-      localStorage.setItem(
-        CONFIG.SESSION_KEY,
-        JSON.stringify(state.session)
-      );
-    } catch (error) {
-      console.warn('Session tidak dapat disimpan:', error);
-    }
-  }
-
-  function readSession() {
-    try {
-      const raw = localStorage.getItem(CONFIG.SESSION_KEY);
-
-      if (!raw) {
-        return null;
-      }
-
-      const parsed = JSON.parse(raw);
-
-      if (
-        !parsed ||
-        !parsed.token ||
-        !parsed.user_id ||
-        !parsed.username
-      ) {
-        return null;
-      }
-
-      return parsed;
-    } catch (error) {
-      console.warn('Session tidak valid:', error);
-      return null;
-    }
-  }
-
-  function clearSession() {
-    state.session = null;
-    localStorage.removeItem(CONFIG.SESSION_KEY);
-  }
-
-  /* ============================================================
-   * GOOGLE APPS SCRIPT API
-   *
-   * Menggunakan hidden iframe + form POST agar tidak bergantung
-   * pada fetch CORS biasa.
-   * ============================================================
-   */
-
-  let apiFrame = null;
-
-  const apiWaiters = new Map();
-
-  function ensureApiFrame() {
-    if (apiFrame && apiFrame.contentWindow) {
-      return apiFrame;
-    }
-
-    apiFrame = document.createElement('iframe');
-
-    apiFrame.name = 'kraepelinApiFrame';
-    apiFrame.title = 'Backend connector';
-    apiFrame.setAttribute('aria-hidden', 'true');
-    apiFrame.tabIndex = -1;
-
-    apiFrame.style.position = 'fixed';
-    apiFrame.style.width = '1px';
-    apiFrame.style.height = '1px';
-    apiFrame.style.border = '0';
-    apiFrame.style.opacity = '0';
-    apiFrame.style.pointerEvents = 'none';
-    apiFrame.style.left = '-10000px';
-    apiFrame.style.top = '-10000px';
-
-    document.body.appendChild(apiFrame);
-
-    return apiFrame;
-  }
-
-  function randomToken(prefix = '') {
-    const parts = [];
-
-    for (let i = 0; i < 3; i += 1) {
-      parts.push(
-        secureRandomInt(0x1000000)
-          .toString(16)
-          .padStart(6, '0')
-      );
-    }
-
-    return `${prefix}${Date.now().toString(36)}-${parts.join('')}`;
-  }
-
-  window.addEventListener('message', (event) => {
-    const frame = apiFrame;
-
-    if (!frame || event.source !== frame.contentWindow) {
-      return;
-    }
-
-    const message = event.data;
-
-    if (
-      !message ||
-      message.type !== 'KRAEPELIN_API_RESPONSE' ||
-      !message.nonce
-    ) {
-      return;
-    }
-
-    const waiter = apiWaiters.get(message.nonce);
-
-    if (!waiter) {
-      return;
-    }
-
-    apiWaiters.delete(message.nonce);
-
-    clearTimeout(waiter.timeoutId);
-
-    if (message.ok === false) {
-      waiter.reject(
-        new Error(
-          message.error ||
-            'Backend tidak dapat memproses permintaan.'
-        )
-      );
-
-      return;
-    }
-
-    waiter.resolve(message.data);
-  });
-
-  async function api(action, payload = {}) {
-    if (!CONFIG.API_URL) {
-      throw new Error(
-        'URL backend belum dikonfigurasi.'
-      );
-    }
-
-    const frame = ensureApiFrame();
-
-    const nonce = randomToken('req-');
-
-    const data = {
-      action,
-      ...payload
-    };
-
-    const form = document.createElement('form');
-
-    form.method = 'POST';
-    form.action = CONFIG.API_URL;
-    form.target = frame.name;
-    form.enctype = 'application/x-www-form-urlencoded';
-    form.acceptCharset = 'UTF-8';
-    form.style.display = 'none';
-
-    const dataInput = document.createElement('input');
-
-    dataInput.type = 'hidden';
-    dataInput.name = 'data';
-    dataInput.value = JSON.stringify(data);
-
-    const nonceInput = document.createElement('input');
-
-    nonceInput.type = 'hidden';
-    nonceInput.name = 'nonce';
-    nonceInput.value = nonce;
-
-    form.appendChild(dataInput);
-    form.appendChild(nonceInput);
-
-    document.body.appendChild(form);
-
-    const resultPromise = new Promise(
-      (resolve, reject) => {
-        const timeoutId = window.setTimeout(() => {
-          apiWaiters.delete(nonce);
-
-          reject(
-            new Error(
-              'Backend tidak merespons. Pastikan Web App Apps Script sudah aktif dan aksesnya disetel ke Anyone.'
-            )
-          );
-        }, 20000);
-
-        apiWaiters.set(nonce, {
-          resolve,
-          reject,
-          timeoutId
-        });
-      }
-    );
-
-    try {
-      form.submit();
-    } catch (error) {
-      const waiter = apiWaiters.get(nonce);
-
-      if (waiter) {
-        apiWaiters.delete(nonce);
-        clearTimeout(waiter.timeoutId);
-      }
-
-      throw new Error(
-        `Gagal mengirim permintaan ke backend: ${
-          error.message || error
-        }`
-      );
-    } finally {
-      window.setTimeout(() => {
-        form.remove();
-      }, 1000);
-    }
-
-    const response = await resultPromise;
-
-    if (!response || response.success !== true) {
-      throw new Error(
-        response?.message ||
-          'Permintaan ke backend gagal.'
-      );
-    }
-
-    return response;
-  }
-
-  async function apiGetHistory() {
-    if (!state.session?.token) {
-      throw new Error('Session login tidak tersedia.');
-    }
-
-    return api('getHistory', {
-      token: state.session.token
-    });
-  }
-
-  /* ============================================================
-   * UI UTILITIES
-   * ============================================================
-   */
-
-  function setBusy(button, text, busy) {
-    if (!button) {
-      return;
-    }
-
-    if (busy) {
-      button.dataset.originalText =
-        button.textContent;
-
-      button.disabled = true;
-      button.textContent = text;
-    } else {
-      button.disabled = false;
-
-      button.textContent =
-        button.dataset.originalText ||
-        button.textContent;
-    }
-  }
-
-  function showToast(
+  // ============================================================
+  // TOAST
+  // ============================================================
+
+  function toast(
     message,
     type = 'info',
-    duration = 2200
+    duration = 2400
   ) {
     const root = $('toastRoot');
 
@@ -560,314 +126,586 @@
 
     root.innerHTML = '';
 
-    const toast = document.createElement('div');
+    const el = document.createElement('div');
 
-    toast.className = `toast toast-${type}`;
+    el.className =
+      `toast toast-${type}`;
 
-    toast.textContent = message;
+    el.textContent = message;
 
-    root.appendChild(toast);
+    root.appendChild(el);
 
     requestAnimationFrame(() => {
-      toast.classList.add('show');
+      el.classList.add('show');
     });
 
     setTimeout(() => {
-      toast.classList.remove('show');
+      el.classList.remove('show');
 
       setTimeout(() => {
-        toast.remove();
+        el.remove();
       }, 220);
     }, duration);
   }
 
-  /* ============================================================
-   * REGISTER
-   * ============================================================
-   */
+  // ============================================================
+  // BUTTON BUSY
+  // ============================================================
 
-  async function register() {
-    const username =
-      $('registerUsername').value.trim();
-
-    const password =
-      $('registerPassword').value;
-
-    const confirm =
-      $('registerConfirm').value;
-
-    const btn = $('registerBtn');
-
-    const error = $('registerError');
-
-    error.textContent = '';
-
-    if (!/^[A-Za-z0-9_]{3,24}$/.test(username)) {
-      error.textContent =
-        'Username 3–24 karakter, hanya huruf, angka, dan underscore.';
-
-      return;
-    }
-
-    if (password.length < 8) {
-      error.textContent =
-        'Password minimal 8 karakter.';
-
-      return;
-    }
-
-    if (password !== confirm) {
-      error.textContent =
-        'Konfirmasi password belum sama.';
-
-      return;
-    }
-
-    setBusy(
-      btn,
-      'Membuat akun…',
-      true
-    );
-
-    try {
-      const data = await api('register', {
-        username,
-        password
-      });
-
-      state.session = data.session;
-
-      persistSession();
-
-      $('registerForm').reset();
-
-      await enterDashboard(
-        'Akun berhasil dibuat. Selamat datang!'
-      );
-    } catch (err) {
-      error.textContent =
-        err?.message ||
-        'Gagal membuat akun.';
-    } finally {
-      setBusy(btn, '', false);
-    }
-  }
-
-  /* ============================================================
-   * LOGIN
-   * ============================================================
-   */
-
-  async function login() {
-    const username =
-      $('loginUsername').value.trim();
-
-    const password =
-      $('loginPassword').value;
-
-    const btn = $('loginBtn');
-
-    const error = $('loginError');
-
-    error.textContent = '';
-
-    if (!username || !password) {
-      error.textContent =
-        'Username dan password wajib diisi.';
-
-      return;
-    }
-
-    setBusy(
-      btn,
-      'Memeriksa…',
-      true
-    );
-
-    try {
-      const data = await api('login', {
-        username,
-        password
-      });
-
-      state.session = data.session;
-
-      persistSession();
-
-      $('loginForm').reset();
-
-      await enterDashboard(
-        'Login berhasil.'
-      );
-    } catch (err) {
-      error.textContent =
-        err?.message ||
-        'Login gagal.';
-    } finally {
-      setBusy(btn, '', false);
-    }
-  }
-
-  /* ============================================================
-   * DASHBOARD
-   * ============================================================
-   */
-
-  async function enterDashboard(
-    toastMessage = ''
+  function busy(
+    button,
+    label,
+    isBusy
   ) {
-    if (!state.session) {
-      showView('landing');
+    if (!button) {
       return;
     }
 
-    $('welcomeName').textContent =
-      state.session.username;
+    if (isBusy) {
+      button.dataset.originalText =
+        button.textContent;
 
-    updateResumeBanner();
+      button.disabled = true;
+      button.textContent = label;
+    } else {
+      button.disabled = false;
 
-    showView('dashboard');
+      button.textContent =
+        button.dataset.originalText ||
+        button.textContent;
+    }
+  }
+
+  // ============================================================
+  // SECURE RANDOM
+  // ============================================================
+
+  function secureRandomInt(max) {
+    if (
+      window.crypto &&
+      typeof window.crypto.getRandomValues ===
+        'function'
+    ) {
+      const maxUint =
+        0x100000000;
+
+      const limit =
+        Math.floor(
+          maxUint / max
+        ) * max;
+
+      const buffer =
+        new Uint32Array(1);
+
+      do {
+        window.crypto.getRandomValues(
+          buffer
+        );
+      } while (
+        buffer[0] >= limit
+      );
+
+      return (
+        buffer[0] % max
+      );
+    }
+
+    return Math.floor(
+      Math.random() * max
+    );
+  }
+
+  function randomDigit() {
+    return secureRandomInt(10);
+  }
+
+  function createRandomColumn() {
+    return Array.from(
+      {
+        length:
+          CONFIG.DIGITS_PER_COLUMN
+      },
+      randomDigit
+    );
+  }
+
+  // ============================================================
+  // SESSION
+  // ============================================================
+
+  function saveSession() {
+    if (!state.session) {
+      localStorage.removeItem(
+        CONFIG.SESSION_KEY
+      );
+
+      return;
+    }
 
     try {
-      const data = await apiGetHistory();
-
-      state.history = Array.isArray(data.history)
-        ? data.history
-        : [];
-
-      renderDashboard();
-
-      renderHistory();
-    } catch (err) {
-      renderDashboard();
-
-      showToast(
-        `Histori belum bisa dimuat: ${
-          err?.message || err
-        }`,
-        'warning',
-        3400
+      localStorage.setItem(
+        CONFIG.SESSION_KEY,
+        JSON.stringify(
+          state.session
+        )
       );
-    }
-
-    if (toastMessage) {
-      showToast(
-        toastMessage,
-        'success'
+    } catch (error) {
+      console.warn(
+        'Session tidak dapat disimpan:',
+        error
       );
     }
   }
 
-  function renderDashboard() {
-    const history = state.history;
+  function loadSession() {
+    try {
+      const raw =
+        localStorage.getItem(
+          CONFIG.SESSION_KEY
+        );
 
-    $('historyCount').textContent =
-      String(history.length);
+      if (!raw) {
+        return null;
+      }
 
-    if (!history.length) {
-      $('latestDate').textContent =
-        'Belum ada tes';
+      const session =
+        JSON.parse(raw);
 
-      [
-        'dashSpeed',
-        'dashAccuracy',
-        'dashConsistency',
-        'dashEndurance'
-      ].forEach((id) => {
-        $(id).textContent = '—';
-      });
+      if (
+        !session?.token ||
+        !session?.user_id ||
+        !session?.username
+      ) {
+        return null;
+      }
 
-      return;
+      return session;
+    } catch (error) {
+      console.warn(
+        'Session tidak valid:',
+        error
+      );
+
+      return null;
     }
-
-    const latest = history[0];
-
-    $('latestDate').textContent =
-      formatDate(latest.tanggal);
-
-    $('dashSpeed').textContent =
-      `${Math.round(
-        Number(latest.speed) || 0
-      )}%`;
-
-    $('dashAccuracy').textContent =
-      `${Math.round(
-        Number(latest.accuracy) || 0
-      )}%`;
-
-    $('dashConsistency').textContent =
-      `${Math.round(
-        Number(latest.consistency) || 0
-      )}%`;
-
-    $('dashEndurance').textContent =
-      `${Math.round(
-        Number(latest.endurance) || 0
-      )}%`;
   }
 
-  /* ============================================================
-   * HISTORY
-   * ============================================================
-   */
+  function clearSession() {
+    state.session = null;
 
-  function renderHistory() {
-    const tbody =
-      $('historyTableBody');
+    localStorage.removeItem(
+      CONFIG.SESSION_KEY
+    );
+  }
 
-    if (!tbody) {
-      return;
+  // ============================================================
+  // APPS SCRIPT API
+  //
+  // POST  -> hidden iframe
+  // GET   -> JSONP polling
+  //
+  // Tidak menggunakan:
+  // - fetch()
+  // - CORS
+  // - postMessage dari Apps Script
+  // ============================================================
+
+  function ensureApiFrame() {
+    if (
+      apiFrame &&
+      apiFrame.contentWindow
+    ) {
+      return apiFrame;
     }
 
-    tbody.innerHTML = '';
+    apiFrame =
+      document.createElement(
+        'iframe'
+      );
 
-    $('historyPageCount').textContent =
-      String(state.history.length);
+    apiFrame.name =
+      'kraepelinApiFrame';
 
-    if (!state.history.length) {
-      $('emptyHistory').hidden = false;
-      $('historyTable').hidden = true;
-      return;
+    apiFrame.title =
+      'Backend connector';
+
+    apiFrame.setAttribute(
+      'aria-hidden',
+      'true'
+    );
+
+    apiFrame.tabIndex = -1;
+
+    Object.assign(
+      apiFrame.style,
+      {
+        position: 'fixed',
+        width: '1px',
+        height: '1px',
+        border: '0',
+        opacity: '0',
+        pointerEvents: 'none',
+        left: '-10000px',
+        top: '-10000px'
+      }
+    );
+
+    document.body.appendChild(
+      apiFrame
+    );
+
+    return apiFrame;
+  }
+
+  function makeNonce() {
+    if (
+      window.crypto &&
+      typeof window.crypto.getRandomValues ===
+        'function'
+    ) {
+      const buffer =
+        new Uint32Array(4);
+
+      window.crypto.getRandomValues(
+        buffer
+      );
+
+      return Array.from(
+        buffer
+      )
+        .map(
+          (number) =>
+            number
+              .toString(16)
+              .padStart(8, '0')
+        )
+        .join('-');
     }
 
-    $('emptyHistory').hidden = true;
-    $('historyTable').hidden = false;
+    return (
+      `${Date.now().toString(36)}-` +
+      `${Math.random()
+        .toString(36)
+        .slice(2)}-` +
+      `${Math.random()
+        .toString(36)
+        .slice(2)}`
+    );
+  }
 
-    state.history.forEach(
-      (item, index) => {
-        const tr =
-          document.createElement('tr');
+  function createJsonpCallbackName() {
+    return (
+      'kraepelinCallback_' +
+      Date.now() +
+      '_' +
+      Math.floor(
+        Math.random() * 1000000
+      )
+    );
+  }
 
-        tr.innerHTML = `
-          <td>${index + 1}</td>
-          <td>${escapeHtml(
-            formatDate(item.tanggal)
-          )}</td>
-          <td>${Math.round(
-            Number(item.speed) || 0
-          )}%</td>
-          <td>${Math.round(
-            Number(item.accuracy) || 0
-          )}%</td>
-          <td>${Math.round(
-            Number(item.consistency) || 0
-          )}%</td>
-          <td>${Math.round(
-            Number(item.endurance) || 0
-          )}%</td>
-        `;
+  function pollApiResponse(
+    nonce,
+    timeoutMs = 20000
+  ) {
+    return new Promise(
+      (
+        resolve,
+        reject
+      ) => {
+        const callbackName =
+          createJsonpCallbackName();
 
-        tbody.appendChild(tr);
+        let settled = false;
+
+        let script = null;
+
+        let timeoutId = null;
+
+        function cleanup() {
+          if (timeoutId) {
+            clearTimeout(
+              timeoutId
+            );
+          }
+
+          try {
+            delete window[
+              callbackName
+            ];
+          } catch (_) {
+            window[
+              callbackName
+            ] = undefined;
+          }
+
+          if (script) {
+            script.remove();
+          }
+        }
+
+        function fail(message) {
+          if (settled) {
+            return;
+          }
+
+          settled = true;
+
+          cleanup();
+
+          reject(
+            new Error(message)
+          );
+        }
+
+        function succeed(value) {
+          if (settled) {
+            return;
+          }
+
+          settled = true;
+
+          cleanup();
+
+          resolve(value);
+        }
+
+        function load() {
+          if (settled) {
+            return;
+          }
+
+          if (script) {
+            script.remove();
+          }
+
+          script =
+            document.createElement(
+              'script'
+            );
+
+          script.async = true;
+
+          script.src =
+            CONFIG.API_URL +
+            '?action=poll' +
+            '&nonce=' +
+            encodeURIComponent(
+              nonce
+            ) +
+            '&callback=' +
+            encodeURIComponent(
+              callbackName
+            ) +
+            '&_=' +
+            Date.now();
+
+          script.onerror = () => {
+            if (!settled) {
+              setTimeout(
+                load,
+                350
+              );
+            }
+          };
+
+          document.head.appendChild(
+            script
+          );
+        }
+
+        window[
+          callbackName
+        ] = (response) => {
+          if (settled) {
+            return;
+          }
+
+          /*
+           * Apps Script memberi:
+           * { pending: true }
+           * jika response belum tersedia.
+           */
+          if (
+            response &&
+            response.pending === true
+          ) {
+            setTimeout(
+              load,
+              200
+            );
+
+            return;
+          }
+
+          if (!response) {
+            fail(
+              'Response dari backend kosong.'
+            );
+
+            return;
+          }
+
+          succeed(
+            response
+          );
+        };
+
+        timeoutId =
+          setTimeout(
+            () => {
+              fail(
+                'Backend tidak merespons dalam 20 detik. Periksa deployment Web App Apps Script.'
+              );
+            },
+            timeoutMs
+          );
+
+        load();
       }
     );
   }
 
-  /* ============================================================
-   * AUTH VIEW
-   * ============================================================
-   */
+  async function api(
+    action,
+    payload = {}
+  ) {
+    if (!CONFIG.API_URL) {
+      throw new Error(
+        'URL backend belum dikonfigurasi.'
+      );
+    }
 
-  function showAuth(mode) {
+    const frame =
+      ensureApiFrame();
+
+    const nonce =
+      makeNonce();
+
+    const data = {
+      action,
+      ...payload,
+      nonce
+    };
+
+    const form =
+      document.createElement(
+        'form'
+      );
+
+    form.method =
+      'POST';
+
+    form.action =
+      CONFIG.API_URL;
+
+    form.target =
+      frame.name;
+
+    form.enctype =
+      'application/x-www-form-urlencoded';
+
+    form.acceptCharset =
+      'UTF-8';
+
+    form.style.display =
+      'none';
+
+    const dataInput =
+      document.createElement(
+        'input'
+      );
+
+    dataInput.type =
+      'hidden';
+
+    dataInput.name =
+      'data';
+
+    dataInput.value =
+      JSON.stringify(
+        data
+      );
+
+    form.appendChild(
+      dataInput
+    );
+
+    document.body.appendChild(
+      form
+    );
+
+    try {
+      /*
+       * Request dikirim ke Apps Script.
+       * Response POST tidak dibaca browser.
+       */
+      form.submit();
+    } catch (error) {
+      form.remove();
+
+      throw new Error(
+        `Gagal mengirim request ke backend: ${
+          error?.message || error
+        }`
+      );
+    }
+
+    setTimeout(
+      () => {
+        form.remove();
+      },
+      1000
+    );
+
+    /*
+     * Ambil response berdasarkan nonce.
+     */
+    const response =
+      await pollApiResponse(
+        nonce
+      );
+
+    if (
+      !response ||
+      response.success !== true
+    ) {
+      throw new Error(
+        response?.message ||
+        'Permintaan ke backend gagal.'
+      );
+    }
+
+    return response;
+  }
+
+  function apiGetHistory() {
+    if (
+      !state.session?.token
+    ) {
+      return Promise.reject(
+        new Error(
+          'Session login tidak tersedia.'
+        )
+      );
+    }
+
+    return api(
+      'getHistory',
+      {
+        token:
+          state.session.token
+      }
+    );
+  }
+
+  // ============================================================
+  // AUTH VIEW
+  // ============================================================
+
+  function showAuth(
+    mode = 'login'
+  ) {
     const registerMode =
       mode === 'register';
 
@@ -887,71 +725,400 @@
     $('registerPane').hidden =
       !registerMode;
 
+    $('loginError').textContent =
+      '';
+
+    $('registerError').textContent =
+      '';
+
     showView('auth');
 
     setTimeout(() => {
-      const input = $(
-        registerMode
-          ? 'registerUsername'
-          : 'loginUsername'
-      );
+      const input =
+        $(
+          registerMode
+            ? 'registerUsername'
+            : 'loginUsername'
+        );
 
-      if (input) {
-        input.focus();
-      }
+      input?.focus();
     }, 50);
   }
 
-  /* ============================================================
-   * KRAEPELIN TEST CREATION
-   * ============================================================
-   */
+  // ============================================================
+  // REGISTER
+  // ============================================================
 
-  function buildTest() {
-    state.columns = Array.from(
-      {
-        length: CONFIG.COLUMNS
-      },
-      createRandomColumn
+  async function register() {
+    const username =
+      $('registerUsername')
+        .value
+        .trim();
+
+    const password =
+      $('registerPassword')
+        .value;
+
+    const confirm =
+      $('registerConfirm')
+        .value;
+
+    const button =
+      $('registerBtn');
+
+    const error =
+      $('registerError');
+
+    error.textContent =
+      '';
+
+    if (
+      !/^[A-Za-z0-9_]{3,24}$/.test(
+        username
+      )
+    ) {
+      error.textContent =
+        'Username 3–24 karakter, hanya huruf, angka, dan underscore.';
+
+      return;
+    }
+
+    if (
+      password.length < 8
+    ) {
+      error.textContent =
+        'Password minimal 8 karakter.';
+
+      return;
+    }
+
+    if (
+      password !== confirm
+    ) {
+      error.textContent =
+        'Konfirmasi password belum sama.';
+
+      return;
+    }
+
+    busy(
+      button,
+      'Membuat akun…',
+      true
     );
 
-    state.answers = Array.from(
-      {
-        length: CONFIG.COLUMNS
-      },
-      () =>
-        Array(
-          CONFIG.QUESTIONS_PER_COLUMN
-        ).fill(null)
-    );
+    try {
+      const response =
+        await api(
+          'register',
+          {
+            username,
+            password
+          }
+        );
 
-    state.columnIndex = 0;
-    state.questionIndex = 0;
+      state.session =
+        response.session;
 
-    const now = Date.now();
+      saveSession();
 
-    state.testStartedAt = now;
-    state.columnStartedAt = now;
+      $('registerForm')
+        .reset();
 
-    state.finished = false;
-
-    state.activeTestUserId =
-      state.session.user_id;
-
-    state.currentTestId =
-      `T-${Date.now()}-${secureRandomInt(
-        1000000
-      )}`;
-
-    state.lastResult = null;
-
-    persistTest();
+      await goDashboard(
+        'Akun berhasil dibuat. Selamat datang!'
+      );
+    } catch (errorObject) {
+      error.textContent =
+        errorObject?.message ||
+        'Gagal membuat akun.';
+    } finally {
+      busy(
+        button,
+        '',
+        false
+      );
+    }
   }
 
-  /* ============================================================
-   * ACTIVE TEST STORAGE
-   * ============================================================
-   */
+  // ============================================================
+  // LOGIN
+  // ============================================================
+
+  async function login() {
+    const username =
+      $('loginUsername')
+        .value
+        .trim();
+
+    const password =
+      $('loginPassword')
+        .value;
+
+    const button =
+      $('loginBtn');
+
+    const error =
+      $('loginError');
+
+    error.textContent =
+      '';
+
+    if (
+      !username ||
+      !password
+    ) {
+      error.textContent =
+        'Username dan password wajib diisi.';
+
+      return;
+    }
+
+    busy(
+      button,
+      'Memeriksa…',
+      true
+    );
+
+    try {
+      const response =
+        await api(
+          'login',
+          {
+            username,
+            password
+          }
+        );
+
+      state.session =
+        response.session;
+
+      saveSession();
+
+      $('loginForm')
+        .reset();
+
+      await goDashboard(
+        'Login berhasil.'
+      );
+    } catch (errorObject) {
+      error.textContent =
+        errorObject?.message ||
+        'Login gagal.';
+    } finally {
+      busy(
+        button,
+        '',
+        false
+      );
+    }
+  }
+
+  // ============================================================
+  // DASHBOARD
+  // ============================================================
+
+  async function goDashboard(
+    message = ''
+  ) {
+    if (!state.session) {
+      showView('landing');
+      return;
+    }
+
+    $('welcomeName').textContent =
+      state.session.username;
+
+    updateResumeBanner();
+
+    showView('dashboard');
+
+    try {
+      const response =
+        await apiGetHistory();
+
+      state.history =
+        Array.isArray(
+          response.history
+        )
+          ? response.history
+          : [];
+
+      renderDashboard();
+
+      renderHistory();
+    } catch (errorObject) {
+      renderDashboard();
+
+      toast(
+        `Histori belum bisa dimuat: ${
+          errorObject?.message ||
+          errorObject
+        }`,
+        'warning',
+        3600
+      );
+    }
+
+    if (message) {
+      toast(
+        message,
+        'success'
+      );
+    }
+  }
+
+  function renderDashboard() {
+    $('historyCount').textContent =
+      String(
+        state.history.length
+      );
+
+    if (
+      !state.history.length
+    ) {
+      $('latestDate').textContent =
+        'Belum ada tes';
+
+      [
+        'dashSpeed',
+        'dashAccuracy',
+        'dashConsistency',
+        'dashEndurance'
+      ].forEach(
+        (id) => {
+          $(id).textContent =
+            '—';
+        }
+      );
+
+      return;
+    }
+
+    const latest =
+      state.history[0];
+
+    $('latestDate').textContent =
+      formatDate(
+        latest.tanggal
+      );
+
+    $('dashSpeed').textContent =
+      `${Math.round(
+        Number(
+          latest.speed
+        ) || 0
+      )}%`;
+
+    $('dashAccuracy').textContent =
+      `${Math.round(
+        Number(
+          latest.accuracy
+        ) || 0
+      )}%`;
+
+    $('dashConsistency').textContent =
+      `${Math.round(
+        Number(
+          latest.consistency
+        ) || 0
+      )}%`;
+
+    $('dashEndurance').textContent =
+      `${Math.round(
+        Number(
+          latest.endurance
+        ) || 0
+      )}%`;
+  }
+
+  // ============================================================
+  // HISTORY
+  // ============================================================
+
+  function renderHistory() {
+    const body =
+      $('historyTableBody');
+
+    if (!body) {
+      return;
+    }
+
+    body.innerHTML =
+      '';
+
+    $('historyPageCount').textContent =
+      String(
+        state.history.length
+      );
+
+    if (
+      !state.history.length
+    ) {
+      $('emptyHistory').hidden =
+        false;
+
+      $('historyTable').hidden =
+        true;
+
+      return;
+    }
+
+    $('emptyHistory').hidden =
+      true;
+
+    $('historyTable').hidden =
+      false;
+
+    state.history.forEach(
+      (
+        item,
+        index
+      ) => {
+        const row =
+          document.createElement(
+            'tr'
+          );
+
+        row.innerHTML = `
+          <td>${index + 1}</td>
+          <td>${escapeHtml(
+            formatDate(
+              item.tanggal
+            )
+          )}</td>
+          <td>${Math.round(
+            Number(
+              item.speed
+            ) || 0
+          )}%</td>
+          <td>${Math.round(
+            Number(
+              item.accuracy
+            ) || 0
+          )}%</td>
+          <td>${Math.round(
+            Number(
+              item.consistency
+            ) || 0
+          )}%</td>
+          <td>${Math.round(
+            Number(
+              item.endurance
+            ) || 0
+          )}%</td>
+        `;
+
+        body.appendChild(
+          row
+        );
+      }
+    );
+  }
+
+  // ============================================================
+  // ACTIVE TEST STORAGE
+  // ============================================================
 
   function persistTest() {
     if (
@@ -965,7 +1132,7 @@
     }
 
     const snapshot = {
-      version: 4,
+      version: 5,
 
       userId:
         state.activeTestUserId,
@@ -995,10 +1162,12 @@
     try {
       localStorage.setItem(
         CONFIG.STORAGE_KEY,
-        JSON.stringify(snapshot)
+        JSON.stringify(
+          snapshot
+        )
       );
     } catch (error) {
-      showToast(
+      toast(
         'Browser tidak mengizinkan penyimpanan progress lokal.',
         'warning',
         3200
@@ -1023,15 +1192,20 @@
         return null;
       }
 
-      const saved = JSON.parse(raw);
+      const saved =
+        JSON.parse(raw);
 
       const valid =
-        saved?.version === 4 &&
+        saved?.version === 5 &&
         saved.userId ===
           state.session?.user_id &&
         saved.testId &&
-        Array.isArray(saved.columns) &&
-        Array.isArray(saved.answers);
+        Array.isArray(
+          saved.columns
+        ) &&
+        Array.isArray(
+          saved.answers
+        );
 
       if (!valid) {
         clearPersistedTest();
@@ -1045,11 +1219,6 @@
     }
   }
 
-  /* ============================================================
-   * RESUME TEST
-   * ============================================================
-   */
-
   function updateResumeBanner() {
     const banner =
       $('resumeTestBanner');
@@ -1058,79 +1227,18 @@
       return;
     }
 
-    const saved =
-      readPersistedTest();
-
-    banner.hidden = !saved;
-  }
-
-  function restoreTest(saved) {
-    state.columns =
-      saved.columns;
-
-    state.answers =
-      saved.answers;
-
-    state.columnIndex =
-      Math.max(
-        0,
-        Math.min(
-          CONFIG.COLUMNS - 1,
-          Number(saved.columnIndex) || 0
-        )
-      );
-
-    state.questionIndex =
-      Math.max(
-        0,
-        Math.min(
-          CONFIG.QUESTIONS_PER_COLUMN - 1,
-          Number(saved.questionIndex) || 0
-        )
-      );
-
-    state.columnStartedAt =
-      Number(saved.columnStartedAt) ||
-      Date.now();
-
-    state.testStartedAt =
-      Number(saved.testStartedAt) ||
-      Date.now();
-
-    state.activeTestUserId =
-      saved.userId;
-
-    state.currentTestId =
-      saved.testId;
-
-    state.finished = false;
-
-    catchUpElapsedColumns();
-
-    if (!state.finished) {
-      persistTest();
-
-      showView('test');
-
-      renderQuestion();
-
-      startTimer();
-
-      showToast(
-        'Tes dilanjutkan. Progress tetap aman setelah refresh.',
-        'success',
-        2500
-      );
-    }
+    banner.hidden =
+      !readPersistedTest();
   }
 
   function catchUpElapsedColumns() {
     const elapsedSeconds =
       Math.max(
         0,
-        (Date.now() -
-          state.columnStartedAt) /
-          1000
+        (
+          Date.now() -
+          state.columnStartedAt
+        ) / 1000
       );
 
     if (
@@ -1146,10 +1254,11 @@
           CONFIG.SECONDS_PER_COLUMN
       );
 
-    const remainingMs =
-      (elapsedSeconds %
-        CONFIG.SECONDS_PER_COLUMN) *
-      1000;
+    const remainderMs =
+      (
+        elapsedSeconds %
+        CONFIG.SECONDS_PER_COLUMN
+      ) * 1000;
 
     if (
       state.columnIndex +
@@ -1163,24 +1272,158 @@
     state.columnIndex +=
       advance;
 
-    state.questionIndex = 0;
+    state.questionIndex =
+      0;
 
     state.columnStartedAt =
       Date.now() -
-      remainingMs;
+      remainderMs;
   }
 
-  /* ============================================================
-   * KRAEPELIN QUESTION
-   * ============================================================
-   */
+  function restoreTest(
+    saved
+  ) {
+    state.columns =
+      saved.columns;
+
+    state.answers =
+      saved.answers;
+
+    state.columnIndex =
+      Math.max(
+        0,
+        Math.min(
+          CONFIG.COLUMNS - 1,
+          Number(
+            saved.columnIndex
+          ) || 0
+        )
+      );
+
+    state.questionIndex =
+      Math.max(
+        0,
+        Math.min(
+          CONFIG.QUESTIONS_PER_COLUMN -
+            1,
+          Number(
+            saved.questionIndex
+          ) || 0
+        )
+      );
+
+    state.columnStartedAt =
+      Number(
+        saved.columnStartedAt
+      ) ||
+      Date.now();
+
+    state.testStartedAt =
+      Number(
+        saved.testStartedAt
+      ) ||
+      Date.now();
+
+    state.activeTestUserId =
+      saved.userId;
+
+    state.currentTestId =
+      saved.testId;
+
+    state.finished =
+      false;
+
+    catchUpElapsedColumns();
+
+    if (state.finished) {
+      return;
+    }
+
+    persistTest();
+
+    showView('test');
+
+    renderQuestion();
+
+    startTimer();
+
+    toast(
+      'Tes dilanjutkan. Progress tetap aman setelah refresh.',
+      'success',
+      2500
+    );
+  }
+
+  // ============================================================
+  // BUILD TEST
+  // ============================================================
+
+  function buildTest() {
+    state.columns =
+      Array.from(
+        {
+          length:
+            CONFIG.COLUMNS
+        },
+        createRandomColumn
+      );
+
+    state.answers =
+      Array.from(
+        {
+          length:
+            CONFIG.COLUMNS
+        },
+        () =>
+          Array(
+            CONFIG.QUESTIONS_PER_COLUMN
+          ).fill(null)
+      );
+
+    state.columnIndex =
+      0;
+
+    state.questionIndex =
+      0;
+
+    const now =
+      Date.now();
+
+    state.columnStartedAt =
+      now;
+
+    state.testStartedAt =
+      now;
+
+    state.finished =
+      false;
+
+    state.activeTestUserId =
+      state.session.user_id;
+
+    state.currentTestId =
+      `T-${Date.now()}-${secureRandomInt(
+        1000000
+      )}`;
+
+    state.lastResult =
+      null;
+
+    persistTest();
+  }
+
+  // ============================================================
+  // KRAEPELIN QUESTION
+  // ============================================================
 
   function getPair(
     columnIndex = state.columnIndex,
     questionIndex = state.questionIndex
   ) {
     const digits =
-      state.columns[columnIndex];
+      state.columns[
+        columnIndex
+      ];
 
     const bottomIndex =
       CONFIG.DIGITS_PER_COLUMN -
@@ -1188,8 +1431,15 @@
       questionIndex;
 
     return {
-      top: digits[bottomIndex - 1],
-      bottom: digits[bottomIndex]
+      top:
+        digits[
+          bottomIndex - 1
+        ],
+
+      bottom:
+        digits[
+          bottomIndex
+        ]
     };
   }
 
@@ -1197,27 +1447,35 @@
     columnIndex,
     questionIndex
   ) {
-    const { top, bottom } =
-      getPair(
-        columnIndex,
-        questionIndex
-      );
+    const {
+      top,
+      bottom
+    } = getPair(
+      columnIndex,
+      questionIndex
+    );
 
-    return (top + bottom) % 10;
+    return (
+      (top + bottom) %
+      10
+    );
   }
 
-  /* ============================================================
-   * RENDER QUESTION
-   * ============================================================
-   */
+  // ============================================================
+  // RENDER QUESTION
+  // ============================================================
 
   function renderQuestion() {
-    if (state.finished) {
+    if (
+      state.finished
+    ) {
       return;
     }
 
-    const { top, bottom } =
-      getPair();
+    const {
+      top,
+      bottom
+    } = getPair();
 
     $('topNumber').textContent =
       top;
@@ -1232,22 +1490,21 @@
       `${state.questionIndex + 1}/${CONFIG.QUESTIONS_PER_COLUMN}`;
 
     updateTimerText();
-
     updateProgress();
   }
 
-  /* ============================================================
-   * TIMER
-   * ============================================================
-   */
+  // ============================================================
+  // TIMER
+  // ============================================================
 
   function updateTimerText() {
     const elapsed =
       Math.max(
         0,
-        (Date.now() -
-          state.columnStartedAt) /
-          1000
+        (
+          Date.now() -
+          state.columnStartedAt
+        ) / 1000
       );
 
     const remaining =
@@ -1269,9 +1526,10 @@
         CONFIG.SECONDS_PER_COLUMN,
         Math.max(
           0,
-          (Date.now() -
-            state.columnStartedAt) /
-            1000
+          (
+            Date.now() -
+            state.columnStartedAt
+          ) / 1000
         )
       );
 
@@ -1281,56 +1539,62 @@
 
     const percent =
       (
-        (state.columnIndex +
-          fraction) /
+        (
+          state.columnIndex +
+          fraction
+        ) /
         CONFIG.COLUMNS
       ) * 100;
 
     $('progressBar').style.width =
       `${Math.min(
         100,
-        Math.max(0, percent)
+        Math.max(
+          0,
+          percent
+        )
       )}%`;
   }
 
-  /* ============================================================
-   * KEYPAD VISUAL FEEDBACK
-   * ============================================================
-   */
-
-  function pulseButton(digit) {
-    const btn =
+  function pulseButton(
+    digit
+  ) {
+    const button =
       document.querySelector(
         `.digit-btn[data-digit="${digit}"]`
       );
 
-    if (!btn) {
+    if (!button) {
       return;
     }
 
-    btn.classList.remove(
+    button.classList.remove(
       'active-pulse'
     );
 
-    void btn.offsetWidth;
+    void button.offsetWidth;
 
-    btn.classList.add(
+    button.classList.add(
       'active-pulse'
     );
 
-    setTimeout(() => {
-      btn.classList.remove(
-        'active-pulse'
-      );
-    }, 110);
+    setTimeout(
+      () => {
+        button.classList.remove(
+          'active-pulse'
+        );
+      },
+      120
+    );
   }
 
-  /* ============================================================
-   * ANSWER
-   * ============================================================
-   */
+  // ============================================================
+  // ANSWER
+  // ============================================================
 
-  function registerAnswer(value) {
+  function registerAnswer(
+    value
+  ) {
     if (
       state.finished ||
       !views.test.classList.contains(
@@ -1341,15 +1605,9 @@
     }
 
     if (
-      !state.answers[state.columnIndex]
-    ) {
-      return;
-    }
-
-    if (
-      state.answers[
+      !state.answers[
         state.columnIndex
-      ][state.questionIndex] !== null
+      ]
     ) {
       return;
     }
@@ -1367,9 +1625,25 @@
       return;
     }
 
+    const current =
+      state.answers[
+        state.columnIndex
+      ][
+        state.questionIndex
+      ];
+
+    if (
+      current !== null &&
+      current !== undefined
+    ) {
+      return;
+    }
+
     state.answers[
       state.columnIndex
-    ][state.questionIndex] =
+    ][
+      state.questionIndex
+    ] =
       numericValue;
 
     pulseButton(
@@ -1380,20 +1654,23 @@
 
     if (
       state.questionIndex <
-      CONFIG.QUESTIONS_PER_COLUMN - 1
+      CONFIG.QUESTIONS_PER_COLUMN -
+        1
     ) {
-      state.questionIndex += 1;
+      state.questionIndex +=
+        1;
 
       renderQuestion();
     } else {
-      nextColumn('completed');
+      nextColumn(
+        'completed'
+      );
     }
   }
 
-  /* ============================================================
-   * COLUMN TRANSITION
-   * ============================================================
-   */
+  // ============================================================
+  // COLUMN TRANSITION
+  // ============================================================
 
   function nextColumn(
     reason = 'timer'
@@ -1406,9 +1683,11 @@
       return;
     }
 
-    state.columnIndex += 1;
+    state.columnIndex +=
+      1;
 
-    state.questionIndex = 0;
+    state.questionIndex =
+      0;
 
     state.columnStartedAt =
       Date.now();
@@ -1417,8 +1696,10 @@
 
     persistTest();
 
-    if (reason === 'timer') {
-      showToast(
+    if (
+      reason === 'timer'
+    ) {
+      toast(
         'Waktu habis — lanjut ke kolom berikutnya.',
         'info',
         850
@@ -1436,23 +1717,23 @@
       return;
     }
 
-    const elapsed =
-      Math.max(
-        0,
-        (Date.now() -
-          state.columnStartedAt) /
-          1000
-      );
-
     updateTimerText();
 
     updateProgress();
+
+    const elapsed =
+      (
+        Date.now() -
+        state.columnStartedAt
+      ) / 1000;
 
     if (
       elapsed >=
       CONFIG.SECONDS_PER_COLUMN
     ) {
-      nextColumn('timer');
+      nextColumn(
+        'timer'
+      );
     }
   }
 
@@ -1460,7 +1741,10 @@
     stopTimer();
 
     state.timerId =
-      setInterval(tick, 50);
+      setInterval(
+        tick,
+        50
+      );
 
     tick();
   }
@@ -1472,13 +1756,13 @@
       );
     }
 
-    state.timerId = null;
+    state.timerId =
+      null;
   }
 
-  /* ============================================================
-   * START TEST
-   * ============================================================
-   */
+  // ============================================================
+  // START TEST
+  // ============================================================
 
   function startTest() {
     if (!state.session) {
@@ -1496,7 +1780,9 @@
         );
 
       if (!replace) {
-        showView('dashboard');
+        showView(
+          'dashboard'
+        );
 
         updateResumeBanner();
 
@@ -1515,33 +1801,51 @@
     startTimer();
   }
 
-  /* ============================================================
-   * SCORING
-   *
-   * Catatan:
-   * Ini adalah scoring latihan internal.
-   * Bukan norma resmi psikotes.
-   * ============================================================
-   */
+  // ============================================================
+  // STATISTICS
+  // ============================================================
+
+  function mean(values) {
+    if (
+      !values.length
+    ) {
+      return 0;
+    }
+
+    return (
+      values.reduce(
+        (
+          total,
+          value
+        ) =>
+          total + value,
+        0
+      ) /
+      values.length
+    );
+  }
 
   function standardDeviation(
     values,
-    mean
+    average
   ) {
-    if (!values.length) {
+    if (
+      !values.length
+    ) {
       return 0;
     }
 
     return Math.sqrt(
-      values.reduce(
-        (sum, value) =>
-          sum +
-          Math.pow(
-            value - mean,
-            2
-          ),
-        0
-      ) / values.length
+      mean(
+        values.map(
+          (value) =>
+            Math.pow(
+              value -
+                average,
+              2
+            )
+        )
+      )
     );
   }
 
@@ -1552,17 +1856,27 @@
   ) {
     return Math.max(
       min,
-      Math.min(max, value)
+      Math.min(
+        max,
+        value
+      )
     );
   }
+
+  // ============================================================
+  // SCORING
+  // ============================================================
 
   function calculateResults() {
     const counts =
       state.answers.map(
-        (col) =>
-          col.filter(
-            (value) =>
-              value !== null
+        (column) =>
+          column.filter(
+            (
+              value
+            ) =>
+              value !==
+              null
           ).length
       );
 
@@ -1570,8 +1884,11 @@
     let correct = 0;
 
     state.answers.forEach(
-      (col, columnIndex) => {
-        col.forEach(
+      (
+        column,
+        columnIndex
+      ) => {
+        column.forEach(
           (
             answer,
             questionIndex
@@ -1582,7 +1899,8 @@
               return;
             }
 
-            answered += 1;
+            answered +=
+              1;
 
             if (
               answer ===
@@ -1591,7 +1909,8 @@
                 questionIndex
               )
             ) {
-              correct += 1;
+              correct +=
+                1;
             }
           }
         );
@@ -1605,142 +1924,134 @@
       CONFIG.COLUMNS *
       CONFIG.QUESTIONS_PER_COLUMN;
 
-    /* ----------------------------------------------------------
-     * KECEPATAN
-     * ----------------------------------------------------------
-     */
-
-    const avg =
-      counts.reduce(
-        (a, b) => a + b,
-        0
-      ) / CONFIG.COLUMNS;
-
+    // Kecepatan
     const speed =
       Math.round(
         clamp(
-          (answered /
-            totalItems) *
-            100
+          (
+            answered /
+            totalItems
+          ) * 100
         )
       );
 
-    /* ----------------------------------------------------------
-     * KETELITIAN
-     * ----------------------------------------------------------
-     */
-
+    // Ketelitian
     const accuracy =
       answered > 0
         ? Math.round(
             clamp(
-              (correct /
-                answered) *
-                100
+              (
+                correct /
+                answered
+              ) * 100
             )
           )
         : 0;
 
-    /* ----------------------------------------------------------
-     * KONSISTENSI
-     * ----------------------------------------------------------
-     */
+    // Konsistensi
+    const average =
+      mean(counts);
 
     const sd =
       standardDeviation(
         counts,
-        avg
+        average
       );
 
-    const cv =
-      avg > 0
-        ? sd / avg
+    const coefficient =
+      average > 0
+        ? sd / average
         : 1;
 
     const consistency =
       Math.round(
         clamp(
           100 -
-            cv * 100
+            coefficient *
+              100
         )
       );
 
-    /* ----------------------------------------------------------
-     * KETAHANAN
-     * ----------------------------------------------------------
-     *
-     * Membandingkan:
-     * - 10 kolom pertama
-     * - 10 kolom tengah
-     * - 10 kolom terakhir
-     *
-     * terhadap penurunan produktivitas.
-     * ----------------------------------------------------------
-     */
-
+    // Ketahanan
     const first =
-      counts
-        .slice(0, 10)
-        .reduce(
-          (a, b) => a + b,
-          0
-        ) / 10;
+      mean(
+        counts.slice(
+          0,
+          10
+        )
+      );
 
     const middle =
-      counts
-        .slice(20, 30)
-        .reduce(
-          (a, b) => a + b,
-          0
-        ) / 10;
+      mean(
+        counts.slice(
+          20,
+          30
+        )
+      );
 
     const last =
-      counts
-        .slice(40, 50)
-        .reduce(
-          (a, b) => a + b,
-          0
-        ) / 10;
+      mean(
+        counts.slice(
+          40,
+          50
+        )
+      );
 
     const baseline =
       Math.max(
         1,
-        (first + middle) / 2
+        mean([
+          first,
+          middle
+        ])
       );
 
     const decline =
       Math.max(
         0,
-        (baseline - last) /
-          baseline
+        (
+          baseline -
+          last
+        ) /
+        baseline
       );
 
     const endurance =
       Math.round(
         clamp(
           100 -
-            decline * 100
+            decline *
+              100
         )
       );
 
     return {
       counts,
+
       answered,
+
       correct,
+
       wrong,
-      avg,
+
+      avg:
+        average,
+
       speed,
+
       accuracy,
+
       consistency,
+
       endurance,
+
       totalItems
     };
   }
 
-  /* ============================================================
-   * SAVE HISTORY
-   * ============================================================
-   */
+  // ============================================================
+  // SAVE HISTORY
+  // ============================================================
 
   async function saveHistory(
     result
@@ -1752,7 +2063,8 @@
       return false;
     }
 
-    state.savingHistory = true;
+    state.savingHistory =
+      true;
 
     try {
       await api(
@@ -1785,10 +2097,11 @@
       );
 
       return true;
-    } catch (err) {
-      showToast(
+    } catch (errorObject) {
+      toast(
         `Hasil tampil, tetapi histori belum tersimpan: ${
-          err?.message || err
+          errorObject?.message ||
+          errorObject
         }`,
         'warning',
         3800
@@ -1796,124 +2109,85 @@
 
       return false;
     } finally {
-      state.savingHistory = false;
+      state.savingHistory =
+        false;
     }
   }
 
-  /* ============================================================
-   * FINISH TEST
-   * ============================================================
-   */
+  // ============================================================
+  // FINISH TEST
+  // ============================================================
 
   async function finishTest() {
-    if (state.finished) {
+    if (
+      state.finished
+    ) {
       return;
     }
 
-    state.finished = true;
+    state.finished =
+      true;
 
     stopTimer();
 
     const result =
       calculateResults();
 
-    state.lastResult = result;
+    state.lastResult =
+      result;
 
     /*
-     * Hapus active test SEBELUM masuk halaman hasil.
+     * Hapus active test.
      *
-     * Jadi setelah tes selesai:
-     * - Refresh hasil -> hasil hilang
-     * - Active test tidak bisa dipulihkan
+     * Kalau halaman result direfresh,
+     * hasil tidak dapat dipulihkan.
      */
-
     clearPersistedTest();
 
-    renderResults(result);
+    renderResults(
+      result
+    );
 
-    showView('result');
+    showView(
+      'result'
+    );
 
-    requestAnimationFrame(() => {
-      drawChart(
-        result.counts
-      );
-    });
+    requestAnimationFrame(
+      () => {
+        drawChart(
+          result.counts
+        );
+      }
+    );
 
-    await saveHistory(result);
+    await saveHistory(
+      result
+    );
 
     try {
-      const data =
+      const response =
         await apiGetHistory();
 
       state.history =
         Array.isArray(
-          data.history
+          response.history
         )
-          ? data.history
+          ? response.history
           : [];
 
       renderDashboard();
-
       renderHistory();
-    } catch (error) {
+    } catch (errorObject) {
       console.warn(
         'Gagal refresh history:',
-        error
+        errorObject
       );
     }
   }
 
-  /* ============================================================
-   * ABANDON / CANCEL TEST
-   * ============================================================
-   */
-
-  function abandonTest() {
-    /*
-     * User sengaja menekan Home lalu
-     * mengonfirmasi keluar.
-     *
-     * Hasil:
-     * - Progress DIHAPUS
-     * - Tes HANGUS
-     * - Tidak masuk history
-     * - Tidak ada hasil akhir
-     */
-
-    stopTimer();
-
-    clearPersistedTest();
-
-    state.columns = [];
-    state.answers = [];
-
-    state.columnIndex = 0;
-    state.questionIndex = 0;
-
-    state.columnStartedAt = 0;
-    state.testStartedAt = 0;
-
-    state.finished = true;
-
-    state.lastResult = null;
-
-    state.activeTestUserId =
-      null;
-
-    state.currentTestId =
-      null;
-
-    closeEndTestModal();
-
-    enterDashboard(
-      'Tes diakhiri. Progress tadi sudah dihapus dan tidak disimpan.'
-    );
-  }
-
-  /* ============================================================
-   * END TEST MODAL
-   * ============================================================
-   */
+  // ============================================================
+  // ABANDON TEST
+  // ============================================================
 
   function openEndTestModal() {
     if (
@@ -1927,7 +2201,7 @@
     $('confirmModal').hidden =
       false;
 
-    $('cancelEndTestBtn').focus();
+    $('cancelEndTestBtn')?.focus();
   }
 
   function closeEndTestModal() {
@@ -1935,35 +2209,91 @@
       true;
   }
 
-  /* ============================================================
-   * RESULT LEVEL
-   * ============================================================
-   */
+  function abandonTest() {
+    /*
+     * Home + konfirmasi =
+     * tes dibatalkan.
+     *
+     * Tidak ada:
+     * - hasil
+     * - history
+     * - progress
+     */
 
-  function level(score) {
-    if (score >= 90) {
+    stopTimer();
+
+    clearPersistedTest();
+
+    state.columns = [];
+
+    state.answers = [];
+
+    state.columnIndex = 0;
+
+    state.questionIndex = 0;
+
+    state.columnStartedAt =
+      0;
+
+    state.testStartedAt =
+      0;
+
+    state.finished =
+      true;
+
+    state.lastResult =
+      null;
+
+    state.activeTestUserId =
+      null;
+
+    state.currentTestId =
+      null;
+
+    closeEndTestModal();
+
+    goDashboard(
+      'Tes diakhiri. Progress tadi dihapus dan tidak disimpan.'
+    );
+  }
+
+  // ============================================================
+  // RESULT LEVEL
+  // ============================================================
+
+  function level(
+    score
+  ) {
+    if (
+      score >= 90
+    ) {
       return 'Sangat baik';
     }
 
-    if (score >= 80) {
+    if (
+      score >= 80
+    ) {
       return 'Baik';
     }
 
-    if (score >= 65) {
+    if (
+      score >= 65
+    ) {
       return 'Cukup';
     }
 
-    if (score >= 50) {
+    if (
+      score >= 50
+    ) {
       return 'Perlu latihan';
     }
 
     return 'Perlu ditingkatkan';
   }
 
-  /* ============================================================
-   * RENDER RESULTS
-   * ============================================================
-   */
+  // ============================================================
+  // RESULT
+  // ============================================================
 
   function renderResults(
     result
@@ -1974,16 +2304,19 @@
         result.speed,
         'speedLevel'
       ],
+
       [
         'accuracyScore',
         result.accuracy,
         'accuracyLevel'
       ],
+
       [
         'consistencyScore',
         result.consistency,
         'consistencyLevel'
       ],
+
       [
         'enduranceScore',
         result.endurance,
@@ -2001,7 +2334,9 @@
           `${score}%`;
 
         $(levelId).textContent =
-          level(score);
+          level(
+            score
+          );
 
         const card =
           $(scoreId).closest(
@@ -2021,23 +2356,28 @@
       `${result.answered} / ${result.totalItems}`;
 
     $('correctSummary').textContent =
-      String(result.correct);
+      String(
+        result.correct
+      );
 
     $('wrongSummary').textContent =
-      String(result.wrong);
+      String(
+        result.wrong
+      );
 
     $('avgSummary').textContent =
-      result.avg.toFixed(1);
+      result.avg.toFixed(
+        1
+      );
 
     $('resultUsername').textContent =
       state.session?.username ||
       '—';
   }
 
-  /* ============================================================
-   * CHART
-   * ============================================================
-   */
+  // ============================================================
+  // CHART
+  // ============================================================
 
   function drawChart(
     counts
@@ -2047,7 +2387,9 @@
 
     if (
       !canvas ||
-      !Array.isArray(counts) ||
+      !Array.isArray(
+        counts
+      ) ||
       counts.length < 2
     ) {
       return;
@@ -2060,11 +2402,13 @@
       Math.max(
         300,
         Math.floor(
-          rect.width || 900
+          rect.width ||
+            900
         )
       );
 
-    const height = 240;
+    const height =
+      240;
 
     const ratio =
       Math.min(
@@ -2077,16 +2421,20 @@
       );
 
     canvas.width =
-      width * ratio;
+      width *
+      ratio;
 
     canvas.height =
-      height * ratio;
+      height *
+      ratio;
 
     canvas.style.height =
       `${height}px`;
 
     const ctx =
-      canvas.getContext('2d');
+      canvas.getContext(
+        '2d'
+      );
 
     ctx.setTransform(
       ratio,
@@ -2104,22 +2452,22 @@
       height
     );
 
-    const p = {
-      l: 34,
-      r: 12,
-      t: 14,
-      b: 29
+    const padding = {
+      left: 34,
+      right: 12,
+      top: 14,
+      bottom: 29
     };
 
-    const pw =
+    const plotWidth =
       width -
-      p.l -
-      p.r;
+      padding.left -
+      padding.right;
 
-    const ph =
+    const plotHeight =
       height -
-      p.t -
-      p.b;
+      padding.top -
+      padding.bottom;
 
     const max =
       CONFIG.QUESTIONS_PER_COLUMN;
@@ -2139,19 +2487,24 @@
       i += 1
     ) {
       const y =
-        p.t +
-        ph -
-        (ph * i) / 5;
+        padding.top +
+        plotHeight -
+        (
+          plotHeight *
+          i
+        ) /
+          5;
 
       ctx.beginPath();
 
       ctx.moveTo(
-        p.l,
+        padding.left,
         y
       );
 
       ctx.lineTo(
-        p.l + pw,
+        padding.left +
+          plotWidth,
         y
       );
 
@@ -2160,7 +2513,11 @@
       ctx.fillText(
         String(
           Math.round(
-            (max * i) / 5
+            (
+              max *
+              i
+            ) /
+              5
           )
         ),
         5,
@@ -2175,16 +2532,24 @@
           index
         ) => ({
           x:
-            p.l +
-            (index /
-              (counts.length - 1)) *
-              pw,
+            padding.left +
+            (
+              index /
+              (
+                counts.length -
+                1
+              )
+            ) *
+              plotWidth,
 
           y:
-            p.t +
-            ph -
-            (value / max) *
-              ph
+            padding.top +
+            plotHeight -
+            (
+              value /
+              max
+            ) *
+              plotHeight
         })
       );
 
@@ -2212,7 +2577,8 @@
     ctx.strokeStyle =
       '#2f7df2';
 
-    ctx.lineWidth = 2.5;
+    ctx.lineWidth =
+      2.5;
 
     ctx.lineJoin =
       'round';
@@ -2238,7 +2604,14 @@
       }
     );
 
-    [0, 9, 19, 29, 39, 49].forEach(
+    [
+      0,
+      9,
+      19,
+      29,
+      39,
+      49
+    ].forEach(
       (index) => {
         if (
           index >=
@@ -2248,16 +2621,23 @@
         }
 
         const x =
-          p.l +
-          (index /
-            (counts.length - 1)) *
-            pw;
+          padding.left +
+          (
+            index /
+            (
+              counts.length -
+              1
+            )
+          ) *
+            plotWidth;
 
         ctx.fillStyle =
           '#7b899b';
 
         ctx.fillText(
-          String(index + 1),
+          String(
+            index + 1
+          ),
           Math.max(
             0,
             x - 5
@@ -2268,10 +2648,146 @@
     );
   }
 
-  /* ============================================================
-   * PDF
-   * ============================================================
-   */
+  // ============================================================
+  // PDF CHART
+  // ============================================================
+
+  function drawPdfChart(
+    canvas,
+    counts
+  ) {
+    const ctx =
+      canvas.getContext(
+        '2d'
+      );
+
+    const width =
+      canvas.width;
+
+    const height =
+      canvas.height;
+
+    ctx.fillStyle =
+      '#ffffff';
+
+    ctx.fillRect(
+      0,
+      0,
+      width,
+      height
+    );
+
+    const padding = {
+      left: 44,
+      right: 18,
+      top: 18,
+      bottom: 28
+    };
+
+    const plotWidth =
+      width -
+      padding.left -
+      padding.right;
+
+    const plotHeight =
+      height -
+      padding.top -
+      padding.bottom;
+
+    const max =
+      CONFIG.QUESTIONS_PER_COLUMN;
+
+    ctx.strokeStyle =
+      '#dfe6ee';
+
+    ctx.lineWidth = 2;
+
+    for (
+      let i = 0;
+      i <= 5;
+      i += 1
+    ) {
+      const y =
+        padding.top +
+        plotHeight -
+        (
+          plotHeight *
+          i
+        ) /
+          5;
+
+      ctx.beginPath();
+
+      ctx.moveTo(
+        padding.left,
+        y
+      );
+
+      ctx.lineTo(
+        padding.left +
+          plotWidth,
+        y
+      );
+
+      ctx.stroke();
+    }
+
+    ctx.beginPath();
+
+    counts.forEach(
+      (
+        value,
+        index
+      ) => {
+        const x =
+          padding.left +
+          (
+            index /
+            (
+              counts.length -
+              1
+            )
+          ) *
+            plotWidth;
+
+        const y =
+          padding.top +
+          plotHeight -
+          (
+            value /
+            max
+          ) *
+            plotHeight;
+
+        if (index) {
+          ctx.lineTo(
+            x,
+            y
+          );
+        } else {
+          ctx.moveTo(
+            x,
+            y
+          );
+        }
+      }
+    );
+
+    ctx.strokeStyle =
+      '#2f7df2';
+
+    ctx.lineWidth =
+      5;
+
+    ctx.lineJoin =
+      'round';
+
+    ctx.stroke();
+  }
+
+  // ============================================================
+  // PDF
+  // ============================================================
 
   function downloadPdf() {
     const result =
@@ -2284,8 +2800,8 @@
       !result ||
       !jsPDF
     ) {
-      showToast(
-        'PDF belum siap. Pastikan koneksi internet aktif, lalu coba lagi.',
+      toast(
+        'PDF belum siap. Pastikan koneksi internet aktif.',
         'warning',
         3200
       );
@@ -2302,6 +2818,10 @@
     const now =
       new Date();
 
+    const username =
+      state.session?.username ||
+      'peserta';
+
     const dateText =
       new Intl.DateTimeFormat(
         'id-ID',
@@ -2309,15 +2829,9 @@
           dateStyle: 'full',
           timeStyle: 'short'
         }
-      ).format(now);
-
-    const username =
-      state.session?.username ||
-      'peserta';
-
-    /*
-     * Header
-     */
+      ).format(
+        now
+      );
 
     doc.setTextColor(
       24,
@@ -2330,7 +2844,9 @@
       'bold'
     );
 
-    doc.setFontSize(21);
+    doc.setFontSize(
+      21
+    );
 
     doc.text(
       'Hasil Latihan Tes Kraepelin',
@@ -2343,7 +2859,9 @@
       'normal'
     );
 
-    doc.setFontSize(9.5);
+    doc.setFontSize(
+      9.5
+    );
 
     doc.setTextColor(
       98,
@@ -2369,23 +2887,22 @@
       42
     );
 
-    /*
-     * Score cards
-     */
-
     const cards = [
       [
         'Kecepatan',
         result.speed
       ],
+
       [
         'Ketelitian',
         result.accuracy
       ],
+
       [
         'Konsistensi',
         result.consistency
       ],
+
       [
         'Ketahanan',
         result.endurance
@@ -2394,12 +2911,18 @@
 
     cards.forEach(
       (
-        [label, score],
+        [
+          label,
+          score
+        ],
         index
       ) => {
         const x =
           20 +
-          (index % 2) *
+          (
+            index %
+            2
+          ) *
             85;
 
         const y =
@@ -2431,7 +2954,9 @@
           120
         );
 
-        doc.setFontSize(9);
+        doc.setFontSize(
+          9
+        );
 
         doc.text(
           label,
@@ -2450,7 +2975,9 @@
           'bold'
         );
 
-        doc.setFontSize(18);
+        doc.setFontSize(
+          18
+        );
 
         doc.text(
           `${score}%`,
@@ -2465,10 +2992,6 @@
       }
     );
 
-    /*
-     * Summary
-     */
-
     doc.setTextColor(
       24,
       38,
@@ -2480,7 +3003,9 @@
       'bold'
     );
 
-    doc.setFontSize(11);
+    doc.setFontSize(
+      11
+    );
 
     doc.text(
       'Ringkasan',
@@ -2493,7 +3018,9 @@
       'normal'
     );
 
-    doc.setFontSize(9.5);
+    doc.setFontSize(
+      9.5
+    );
 
     doc.text(
       `Total dijawab   : ${result.answered}/${result.totalItems}`,
@@ -2521,19 +3048,18 @@
       157
     );
 
-    /*
-     * Chart for PDF
-     */
-
     const chartCanvas =
       document.createElement(
         'canvas'
       );
 
-    chartCanvas.width = 900;
-    chartCanvas.height = 240;
+    chartCanvas.width =
+      900;
 
-    drawChartOnCanvas(
+    chartCanvas.height =
+      240;
+
+    drawPdfChart(
       chartCanvas,
       result.counts
     );
@@ -2549,11 +3075,9 @@
       45
     );
 
-    /*
-     * Disclaimer
-     */
-
-    doc.setFontSize(8.5);
+    doc.setFontSize(
+      8.5
+    );
 
     doc.setTextColor(
       100,
@@ -2573,10 +3097,6 @@
       224
     );
 
-    /*
-     * Interpretation
-     */
-
     doc.setTextColor(
       24,
       38,
@@ -2588,7 +3108,9 @@
       'bold'
     );
 
-    doc.setFontSize(10);
+    doc.setFontSize(
+      10
+    );
 
     doc.text(
       'Interpretasi latihan',
@@ -2601,7 +3123,9 @@
       'normal'
     );
 
-    doc.setFontSize(9);
+    doc.setFontSize(
+      9
+    );
 
     doc.text(
       `Kecepatan: ${level(
@@ -2632,151 +3156,98 @@
     doc.save(
       `hasil-kraepelin-${safeName}-${now
         .toISOString()
-        .slice(0, 10)}.pdf`
+        .slice(
+          0,
+          10
+        )}.pdf`
     );
 
-    showToast(
+    toast(
       'PDF berhasil dibuat.',
       'success',
       1800
     );
   }
 
-  function drawChartOnCanvas(
-    canvas,
-    counts
-  ) {
-    const ctx =
-      canvas.getContext('2d');
+  // ============================================================
+  // LOGOUT
+  // ============================================================
 
-    const width =
-      canvas.width;
+  async function logout() {
+    const active =
+      readPersistedTest();
 
-    const height =
-      canvas.height;
+    if (active) {
+      const confirmLogout =
+        window.confirm(
+          'Ada tes yang belum selesai. Logout akan menghapus progress tes tersebut. Lanjut logout?'
+        );
 
-    /*
-     * Background
-     */
-
-    ctx.fillStyle =
-      '#ffffff';
-
-    ctx.fillRect(
-      0,
-      0,
-      width,
-      height
-    );
-
-    const p = {
-      l: 44,
-      r: 18,
-      t: 18,
-      b: 28
-    };
-
-    const pw =
-      width -
-      p.l -
-      p.r;
-
-    const ph =
-      height -
-      p.t -
-      p.b;
-
-    const max =
-      CONFIG.QUESTIONS_PER_COLUMN;
-
-    /*
-     * Grid
-     */
-
-    ctx.strokeStyle =
-      '#dfe6ee';
-
-    ctx.lineWidth = 2;
-
-    for (
-      let i = 0;
-      i <= 5;
-      i += 1
-    ) {
-      const y =
-        p.t +
-        ph -
-        (ph * i) / 5;
-
-      ctx.beginPath();
-
-      ctx.moveTo(
-        p.l,
-        y
-      );
-
-      ctx.lineTo(
-        p.l + pw,
-        y
-      );
-
-      ctx.stroke();
+      if (!confirmLogout) {
+        return;
+      }
     }
 
-    /*
-     * Line
-     */
-
-    ctx.beginPath();
-
-    counts.forEach(
-      (
-        value,
-        index
-      ) => {
-        const x =
-          p.l +
-          (index /
-            (counts.length - 1)) *
-            pw;
-
-        const y =
-          p.t +
-          ph -
-          (value / max) *
-            ph;
-
-        if (index) {
-          ctx.lineTo(
-            x,
-            y
-          );
-        } else {
-          ctx.moveTo(
-            x,
-            y
-          );
-        }
+    try {
+      if (
+        state.session?.token
+      ) {
+        await api(
+          'logout',
+          {
+            token:
+              state.session.token
+          }
+        );
       }
+    } catch (
+      errorObject
+    ) {
+      console.warn(
+        'Logout backend gagal:',
+        errorObject
+      );
+    }
+
+    clearSession();
+
+    clearPersistedTest();
+
+    stopTimer();
+
+    state.columns = [];
+
+    state.answers = [];
+
+    state.lastResult =
+      null;
+
+    state.finished =
+      true;
+
+    state.activeTestUserId =
+      null;
+
+    state.currentTestId =
+      null;
+
+    showView(
+      'landing'
     );
 
-    ctx.strokeStyle =
-      '#2f7df2';
-
-    ctx.lineWidth = 5;
-
-    ctx.lineJoin =
-      'round';
-
-    ctx.stroke();
+    toast(
+      'Kamu sudah logout.',
+      'info'
+    );
   }
 
-  /* ============================================================
-   * FORMAT / ESCAPE
-   * ============================================================
-   */
+  // ============================================================
+  // HELPER
+  // ============================================================
 
-  function formatDate(value) {
+  function formatDate(
+    value
+  ) {
     const date =
       new Date(value);
 
@@ -2793,347 +3264,296 @@
     return new Intl.DateTimeFormat(
       'id-ID',
       {
-        dateStyle: 'medium',
-        timeStyle: 'short'
+        dateStyle:
+          'medium',
+        timeStyle:
+          'short'
       }
-    ).format(date);
+    ).format(
+      date
+    );
   }
 
-  function escapeHtml(value) {
+  function escapeHtml(
+    value
+  ) {
     return String(
       value
     ).replace(
       /[&<>'"]/g,
       (match) =>
         ({
-          '&': '&amp;',
-          '<': '&lt;',
-          '>': '&gt;',
-          "'": '&#39;',
-          '"': '&quot;'
-        })[match]
+          '&':
+            '&amp;',
+
+          '<':
+            '&lt;',
+
+          '>':
+            '&gt;',
+
+          "'":
+            '&#39;',
+
+          '"':
+            '&quot;'
+        })[
+          match
+        ]
     );
   }
 
-  /* ============================================================
-   * LOGOUT
-   * ============================================================
-   */
-
-  async function logout() {
-    const saved =
-      readPersistedTest();
-
-    if (saved) {
-      const confirmed =
-        window.confirm(
-          'Ada tes yang belum selesai. Keluar akun sekarang akan membuat tes itu tidak bisa dilanjutkan. Lanjut keluar?'
-        );
-
-      if (!confirmed) {
-        return;
-      }
-    }
-
-    try {
-      if (state.session?.token) {
-        await api(
-          'logout',
-          {
-            token:
-              state.session.token
-          }
-        );
-      }
-    } catch (error) {
-      console.warn(
-        'Logout backend gagal:',
-        error
-      );
-    }
-
-    clearSession();
-
-    clearPersistedTest();
-
-    stopTimer();
-
-    state.finished = true;
-
-    state.columns = [];
-    state.answers = [];
-
-    state.lastResult = null;
-
-    state.activeTestUserId = null;
-    state.currentTestId = null;
-
-    showView('landing');
-
-    showToast(
-      'Kamu sudah logout.',
-      'info'
-    );
-  }
-
-  /* ============================================================
-   * INITIALIZE
-   * ============================================================
-   */
-
-  async function initialize() {
-    setApiStatus();
-
-    state.session =
-      readSession();
-
-    if (state.session) {
-      if ($('welcomeName')) {
-        $('welcomeName').textContent =
-          state.session.username;
-      }
-
-      await enterDashboard();
-
-      updateResumeBanner();
-    } else {
-      showView('landing');
-    }
-  }
-
-  /* ============================================================
-   * EVENT BINDINGS
-   * ============================================================
-   */
+  // ============================================================
+  // EVENTS
+  // ============================================================
 
   function bindEvents() {
-    /*
-     * Landing
-     */
+    // Landing
+    $('landingLoginBtn')
+      ?.addEventListener(
+        'click',
+        () =>
+          showAuth(
+            'login'
+          )
+      );
 
-    $('landingLoginBtn')?.addEventListener(
-      'click',
-      () => {
-        showAuth('login');
-      }
-    );
+    $('landingRegisterBtn')
+      ?.addEventListener(
+        'click',
+        () =>
+          showAuth(
+            'register'
+          )
+      );
 
-    $('landingRegisterBtn')?.addEventListener(
-      'click',
-      () => {
-        showAuth('register');
-      }
-    );
+    // Auth navigation
+    $('openLoginFromRegister')
+      ?.addEventListener(
+        'click',
+        () =>
+          showAuth(
+            'login'
+          )
+      );
 
-    /*
-     * Auth navigation
-     */
+    $('openRegisterFromLogin')
+      ?.addEventListener(
+        'click',
+        () =>
+          showAuth(
+            'register'
+          )
+      );
 
-    $('openLoginFromRegister')?.addEventListener(
-      'click',
-      () => {
-        showAuth('login');
-      }
-    );
+    $('backToLandingBtn')
+      ?.addEventListener(
+        'click',
+        () =>
+          showView(
+            'landing'
+          )
+      );
 
-    $('openRegisterFromLogin')?.addEventListener(
-      'click',
-      () => {
-        showAuth('register');
-      }
-    );
-
-    $('backToLandingBtn')?.addEventListener(
-      'click',
-      () => {
-        showView('landing');
-      }
-    );
-
-    /*
-     * Forms
-     */
-
-    $('loginForm')?.addEventListener(
-      'submit',
-      (event) => {
-        event.preventDefault();
-        login();
-      }
-    );
-
-    $('registerForm')?.addEventListener(
-      'submit',
-      (event) => {
-        event.preventDefault();
-        register();
-      }
-    );
-
-    /*
-     * Dashboard
-     */
-
-    $('startPracticeBtn')?.addEventListener(
-      'click',
-      () => {
-        showView('instruction');
-      }
-    );
-
-    $('viewHistoryBtn')?.addEventListener(
-      'click',
-      () => {
-        renderHistory();
-        showView('history');
-      }
-    );
-
-    $('backDashboardBtn')?.addEventListener(
-      'click',
-      () => {
-        enterDashboard();
-      }
-    );
-
-    $('backFromInstructionBtn')?.addEventListener(
-      'click',
-      () => {
-        enterDashboard();
-      }
-    );
-
-    $('logoutBtn')?.addEventListener(
-      'click',
-      logout
-    );
-
-    /*
-     * Resume
-     */
-
-    $('resumeTestBtn')?.addEventListener(
-      'click',
-      () => {
-        const saved =
-          readPersistedTest();
-
-        if (saved) {
-          restoreTest(saved);
-        } else {
-          updateResumeBanner();
+    // Forms
+    $('loginForm')
+      ?.addEventListener(
+        'submit',
+        (
+          event
+        ) => {
+          event.preventDefault();
+          login();
         }
-      }
-    );
+      );
 
-    /*
-     * Test
-     */
+    $('registerForm')
+      ?.addEventListener(
+        'submit',
+        (
+          event
+        ) => {
+          event.preventDefault();
+          register();
+        }
+      );
 
-    $('startTestBtn')?.addEventListener(
-      'click',
-      startTest
-    );
+    // Dashboard
+    $('startPracticeBtn')
+      ?.addEventListener(
+        'click',
+        () =>
+          showView(
+            'instruction'
+          )
+      );
 
-    /*
-     * Result
-     */
+    $('viewHistoryBtn')
+      ?.addEventListener(
+        'click',
+        () => {
+          renderHistory();
 
-    $('downloadPdfBtn')?.addEventListener(
-      'click',
-      downloadPdf
-    );
+          showView(
+            'history'
+          );
+        }
+      );
 
-    $('resultHistoryBtn')?.addEventListener(
-      'click',
-      () => {
-        renderHistory();
-        showView('history');
-      }
-    );
+    $('backDashboardBtn')
+      ?.addEventListener(
+        'click',
+        () =>
+          goDashboard()
+      );
 
-    $('finishBtn')?.addEventListener(
-      'click',
-      () => {
-        state.lastResult = null;
-        enterDashboard();
-      }
-    );
+    $('backFromInstructionBtn')
+      ?.addEventListener(
+        'click',
+        () =>
+          goDashboard()
+      );
 
-    /*
-     * Keypad
-     */
+    $('logoutBtn')
+      ?.addEventListener(
+        'click',
+        logout
+      );
 
+    // Resume
+    $('resumeTestBtn')
+      ?.addEventListener(
+        'click',
+        () => {
+          const saved =
+            readPersistedTest();
+
+          if (saved) {
+            restoreTest(
+              saved
+            );
+          } else {
+            updateResumeBanner();
+          }
+        }
+      );
+
+    // Test
+    $('startTestBtn')
+      ?.addEventListener(
+        'click',
+        startTest
+      );
+
+    $('testHomeBtn')
+      ?.addEventListener(
+        'click',
+        openEndTestModal
+      );
+
+    // Result
+    $('downloadPdfBtn')
+      ?.addEventListener(
+        'click',
+        downloadPdf
+      );
+
+    $('resultHistoryBtn')
+      ?.addEventListener(
+        'click',
+        () => {
+          renderHistory();
+
+          showView(
+            'history'
+          );
+        }
+      );
+
+    $('finishBtn')
+      ?.addEventListener(
+        'click',
+        () => {
+          state.lastResult =
+            null;
+
+          goDashboard();
+        }
+      );
+
+    // History
+    $('backDashboardBtn')
+      ?.addEventListener(
+        'click',
+        () =>
+          goDashboard()
+      );
+
+    // Keypad
     document
       .querySelectorAll(
         '.digit-btn'
       )
-      .forEach((btn) => {
-        btn.addEventListener(
-          'click',
-          () => {
-            registerAnswer(
-              btn.dataset.digit
-            );
-          }
-        );
-      });
-
-    /*
-     * Home / End Test
-     */
-
-    $('testHomeBtn')?.addEventListener(
-      'click',
-      openEndTestModal
-    );
-
-    $('cancelEndTestBtn')?.addEventListener(
-      'click',
-      closeEndTestModal
-    );
-
-    $('confirmEndTestBtn')?.addEventListener(
-      'click',
-      abandonTest
-    );
-
-    $('confirmModal')?.addEventListener(
-      'click',
-      (event) => {
-        if (
-          event.target ===
-          $('confirmModal')
-        ) {
-          closeEndTestModal();
+      .forEach(
+        (
+          button
+        ) => {
+          button.addEventListener(
+            'click',
+            () =>
+              registerAnswer(
+                button.dataset
+                  .digit
+              )
+          );
         }
-      }
-    );
+      );
 
-    /*
-     * Keyboard angka 0-9
-     */
+    // Modal
+    $('cancelEndTestBtn')
+      ?.addEventListener(
+        'click',
+        closeEndTestModal
+      );
 
+    $('confirmEndTestBtn')
+      ?.addEventListener(
+        'click',
+        abandonTest
+      );
+
+    $('confirmModal')
+      ?.addEventListener(
+        'click',
+        (
+          event
+        ) => {
+          if (
+            event.target ===
+            $('confirmModal')
+          ) {
+            closeEndTestModal();
+          }
+        }
+      );
+
+    // Keyboard
     window.addEventListener(
       'keydown',
-      (event) => {
-        /*
-         * Escape menutup modal konfirmasi
-         */
-
+      (
+        event
+      ) => {
         if (
           event.key ===
             'Escape' &&
           $('confirmModal') &&
-          !$('confirmModal').hidden
+          !$('confirmModal')
+            .hidden
         ) {
           closeEndTestModal();
+
           return;
         }
-
-        /*
-         * Hanya aktif ketika test
-         */
 
         if (
           !views.test.classList.contains(
@@ -3142,11 +3562,6 @@
         ) {
           return;
         }
-
-        /*
-         * Jangan mengganggu tombol Home,
-         * modal, atau input lain.
-         */
 
         if (
           /^\d$/.test(
@@ -3162,13 +3577,7 @@
       }
     );
 
-    /*
-     * Refresh / close browser
-     *
-     * persistTest() dilakukan lagi sebagai
-     * backup sebelum page unload.
-     */
-
+    // Backup progress saat refresh
     window.addEventListener(
       'beforeunload',
       () => {
@@ -3183,10 +3592,7 @@
       }
     );
 
-    /*
-     * Responsive chart
-     */
-
+    // Responsive chart
     window.addEventListener(
       'resize',
       () => {
@@ -3203,13 +3609,12 @@
       }
     );
 
-    /*
-     * Jika session dihapus dari tab lain.
-     */
-
+    // Session berubah di tab lain
     window.addEventListener(
       'storage',
-      (event) => {
+      (
+        event
+      ) => {
         if (
           event.key ===
             CONFIG.SESSION_KEY &&
@@ -3222,9 +3627,11 @@
 
           clearPersistedTest();
 
-          showView('landing');
+          showView(
+            'landing'
+          );
 
-          showToast(
+          toast(
             'Sesi akun telah berakhir di tab lain.',
             'warning'
           );
@@ -3233,12 +3640,33 @@
     );
   }
 
-  /* ============================================================
-   * BOOT
-   * ============================================================
-   */
+  // ============================================================
+  // INIT
+  // ============================================================
+
+  async function initialize() {
+    state.session =
+      loadSession();
+
+    if (
+      state.session
+    ) {
+      await goDashboard();
+
+      return;
+    }
+
+    showView(
+      'landing'
+    );
+  }
+
+  // ============================================================
+  // START APP
+  // ============================================================
 
   bindEvents();
 
   initialize();
+
 })();
