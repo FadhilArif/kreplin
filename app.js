@@ -32,6 +32,7 @@
 
     STORAGE_KEY: 'kraepelin_active_test_v5',
     SESSION_KEY: 'kraepelin_session_v5',
+    GUEST_TEST_KEY: 'kraepelin_guest_test_v1',
 
     API_URL:
       'https://script.google.com/macros/s/AKfycbwtcJdN60aa3sbe-CGyqGSj72g7AH47dNJySyNk41pS_3Q7e-M03wfQSumNxItNgP_-yw/exec'
@@ -59,6 +60,7 @@
 
   const state = {
     session: null,
+    isGuest: false,
 
     history: [],
 
@@ -101,6 +103,8 @@
     }
 
     document.body.dataset.view = name;
+    document.body.dataset.mode =
+      state.isGuest ? 'guest' : 'account';
 
     if (name !== 'test') {
       stopTimer();
@@ -295,6 +299,43 @@
 
     localStorage.removeItem(
       CONFIG.SESSION_KEY
+    );
+  }
+
+  function enterGuestMode() {
+    state.session = null;
+    state.isGuest = true;
+    state.history = [];
+    state.lastResult = null;
+
+    /*
+     * Guest mode sengaja tidak menggunakan
+     * session akun dan tidak mengirim data
+     * hasil ke Google Sheets.
+     */
+    localStorage.removeItem(CONFIG.SESSION_KEY);
+
+    if ($('welcomeName')) {
+      $('welcomeName').textContent = 'Tamu';
+    }
+
+    updateResumeBanner();
+  }
+
+  function leaveGuestMode() {
+    state.isGuest = false;
+    state.session = null;
+    state.history = [];
+    state.lastResult = null;
+
+    clearGuestPersistedTest();
+
+    document.body.dataset.mode = 'account';
+  }
+
+  function clearGuestPersistedTest() {
+    localStorage.removeItem(
+      CONFIG.GUEST_TEST_KEY
     );
   }
 
@@ -570,6 +611,12 @@
     action,
     payload = {}
   ) {
+    if (state.isGuest) {
+      throw new Error(
+        'Mode tamu tidak menggunakan backend akun.'
+      );
+    }
+
     if (!CONFIG.API_URL) {
       throw new Error(
         'URL backend belum dikonfigurasi.'
@@ -680,6 +727,13 @@
   }
 
   function apiGetHistory() {
+    if (state.isGuest) {
+      return Promise.resolve({
+        success: true,
+        history: []
+      });
+    }
+
     if (
       !state.session?.token
     ) {
@@ -696,6 +750,34 @@
         token:
           state.session.token
       }
+    );
+  }
+
+  // ============================================================
+  // GUEST MODE
+  // ============================================================
+
+  function openGuestModal() {
+    $('guestModal').hidden = false;
+    $('cancelGuestBtn')?.focus();
+  }
+
+  function closeGuestModal() {
+    $('guestModal').hidden = true;
+  }
+
+  function confirmGuestMode() {
+    closeGuestModal();
+
+    leaveGuestMode();
+    enterGuestMode();
+
+    showView('instruction');
+
+    toast(
+      'Mode tamu aktif. Hasil tidak masuk histori.',
+      'info',
+      2600
     );
   }
 
@@ -817,6 +899,8 @@
           }
         );
 
+      state.isGuest = false;
+      state.isGuest = false;
       state.session =
         response.session;
 
@@ -921,6 +1005,11 @@
   async function goDashboard(
     message = ''
   ) {
+    if (state.isGuest) {
+      showView('landing');
+      return;
+    }
+
     if (!state.session) {
       showView('landing');
       return;
@@ -1123,7 +1212,20 @@
   function persistTest() {
     if (
       state.finished ||
-      !state.columns.length ||
+      !state.columns.length
+    ) {
+      return;
+    }
+
+    if (state.isGuest) {
+      /*
+       * Mode tamu tidak menyimpan progress ke
+       * localStorage, akun, atau Google Sheets.
+       */
+      return;
+    }
+
+    if (
       !state.session ||
       state.activeTestUserId !==
         state.session.user_id
@@ -1182,6 +1284,10 @@
   }
 
   function readPersistedTest() {
+    if (state.isGuest) {
+      return null;
+    }
+
     try {
       const raw =
         localStorage.getItem(
@@ -1399,7 +1505,9 @@
       false;
 
     state.activeTestUserId =
-      state.session.user_id;
+      state.isGuest
+        ? null
+        : state.session.user_id;
 
     state.currentTestId =
       `T-${Date.now()}-${secureRandomInt(
@@ -1765,7 +1873,7 @@
   // ============================================================
 
   function startTest() {
-    if (!state.session) {
+    if (!state.session && !state.isGuest) {
       showAuth('login');
       return;
     }
@@ -2056,6 +2164,10 @@
   async function saveHistory(
     result
   ) {
+    if (state.isGuest) {
+      return false;
+    }
+
     if (
       !state.session ||
       state.savingHistory
@@ -2163,6 +2275,11 @@
     await saveHistory(
       result
     );
+
+    if (state.isGuest) {
+      state.history = [];
+      return;
+    }
 
     try {
       const response =
@@ -2371,8 +2488,24 @@
       );
 
     $('resultUsername').textContent =
-      state.session?.username ||
-      '—';
+      state.isGuest
+        ? 'Tamu'
+        : state.session?.username || '—';
+
+    const resultIntro =
+      $('resultIntro');
+
+    if (resultIntro) {
+      if (state.isGuest) {
+        resultIntro.innerHTML =
+          'Hasil untuk <strong>Tamu</strong> tidak disimpan ke histori. <strong>Download PDF sekarang</strong> untuk menyimpan hasil latihanmu.';
+      } else {
+        resultIntro.innerHTML =
+          `Hasil untuk <strong>${escapeHtml(
+            state.session?.username || 'peserta'
+          )}</strong> sudah masuk ke histori. Download PDF kalau ingin menyimpan salinan detailnya.`;
+      }
+    }
   }
 
   // ============================================================
@@ -3174,6 +3307,19 @@
   // ============================================================
 
   async function logout() {
+    if (state.isGuest) {
+      leaveGuestMode();
+
+      showView('landing');
+
+      toast(
+        'Mode tamu selesai.',
+        'info'
+      );
+
+      return;
+    }
+
     const active =
       readPersistedTest();
 
@@ -3327,6 +3473,12 @@
           )
       );
 
+    $('landingGuestBtn')
+      ?.addEventListener(
+        'click',
+        openGuestModal
+      );
+
     // Auth navigation
     $('openLoginFromRegister')
       ?.addEventListener(
@@ -3410,8 +3562,14 @@
     $('backFromInstructionBtn')
       ?.addEventListener(
         'click',
-        () =>
-          goDashboard()
+        () => {
+          if (state.isGuest) {
+            leaveGuestMode();
+            showView('landing');
+          } else {
+            goDashboard();
+          }
+        }
       );
 
     $('logoutBtn')
@@ -3462,6 +3620,15 @@
       ?.addEventListener(
         'click',
         () => {
+          if (state.isGuest) {
+            toast(
+              'Mode tamu tidak memiliki histori. Download PDF untuk menyimpan hasil.',
+              'info',
+              3000
+            );
+            return;
+          }
+
           renderHistory();
 
           showView(
@@ -3477,7 +3644,12 @@
           state.lastResult =
             null;
 
-          goDashboard();
+          if (state.isGuest) {
+            leaveGuestMode();
+            showView('landing');
+          } else {
+            goDashboard();
+          }
         }
       );
 
@@ -3522,6 +3694,31 @@
         abandonTest
       );
 
+    $('cancelGuestBtn')
+      ?.addEventListener(
+        'click',
+        closeGuestModal
+      );
+
+    $('confirmGuestBtn')
+      ?.addEventListener(
+        'click',
+        confirmGuestMode
+      );
+
+    $('guestModal')
+      ?.addEventListener(
+        'click',
+        (event) => {
+          if (
+            event.target ===
+            $('guestModal')
+          ) {
+            closeGuestModal();
+          }
+        }
+      );
+
     $('confirmModal')
       ?.addEventListener(
         'click',
@@ -3543,6 +3740,17 @@
       (
         event
       ) => {
+        if (
+          event.key ===
+            'Escape' &&
+          $('guestModal') &&
+          !$('guestModal').hidden
+        ) {
+          closeGuestModal();
+
+          return;
+        }
+
         if (
           event.key ===
             'Escape' &&
@@ -3647,6 +3855,8 @@
   async function initialize() {
     state.session =
       loadSession();
+
+    state.isGuest = false;
 
     if (
       state.session
