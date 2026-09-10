@@ -31,6 +31,7 @@
             <button id="landingLoginBtn" class="secondary-btn large-btn">Masuk</button>
             <button id="landingRegisterBtn" class="primary-btn large-btn">Buat Akun <span>→</span></button>
           </div>
+          <button id="landingGuestBtn" class="guest-btn" type="button">Lanjut sebagai Tamu</button>
           <p class="comfort-note">Buat akun agar hasil latihanmu tersimpan di histori dan bisa dibandingkan dari waktu ke waktu.</p>
           <p class="api-status" data-api-status></p>
         </div>
@@ -192,7 +193,7 @@
           <div>
             <div class="eyebrow">HASIL LATIHAN</div>
             <h2>Tes selesai 🎉</h2>
-            <p class="result-intro">Hasil untuk <strong id="resultUsername">—</strong> sudah masuk ke histori. Download PDF kalau ingin menyimpan salinan detailnya.</p>
+            <p id="resultIntro" class="result-intro">Hasil untuk <strong id="resultUsername">—</strong> sudah masuk ke histori. Download PDF kalau ingin menyimpan salinan detailnya.</p>
           </div>
         </div>
 
@@ -251,6 +252,30 @@
       <div class="modal-actions">
         <button id="cancelEndTestBtn" class="secondary-btn" type="button">Batal, lanjutkan</button>
         <button id="confirmEndTestBtn" class="danger-btn" type="button">Ya, akhiri tes</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="guestModal" class="modal-backdrop" hidden>
+    <div class="modal-card card guest-modal" role="dialog" aria-modal="true" aria-labelledby="guestModalTitle">
+      <div class="modal-icon guest-modal-icon">i</div>
+      <h3 id="guestModalTitle">Lanjut sebagai Tamu?</h3>
+      <p id="guestModalText">
+        Kamu tetap bisa mengerjakan tes dan mengunduh hasil PDF.
+        Namun, hasil tes <strong>tidak akan disimpan ke akun atau histori</strong>.
+        Jika halaman ditutup atau di-refresh saat mode tamu, progress dapat hilang.
+      </p>
+      <div class="guest-note">
+        <span>✓</span>
+        <div><b>Tetap bisa tes seperti biasa</b><small>50 kolom • 26 soal/kolom • 15 detik/kolom</small></div>
+      </div>
+      <div class="guest-note">
+        <span>↓</span>
+        <div><b>Download PDF setelah selesai</b><small>PDF adalah satu-satunya salinan hasil mode tamu.</small></div>
+      </div>
+      <div class="modal-actions">
+        <button id="cancelGuestBtn" class="secondary-btn" type="button">Batal</button>
+        <button id="confirmGuestBtn" class="primary-btn" type="button">Ya, lanjut sebagai tamu</button>
       </div>
     </div>
   </div>
