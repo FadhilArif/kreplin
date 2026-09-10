@@ -8,7 +8,7 @@
     SECONDS_PER_COLUMN: 15,
     STORAGE_KEY: 'kraepelin_active_test_v4',
     SESSION_KEY: 'kraepelin_session_v2',
-    API_URL: 'https://script.google.com/macros/s/AKfycbzQmafeeL8yl5N6LgSvk7RaKTZzgpK832uG4hmoxRp8O1we5wW219bYkJyhBvtbnFn7ig/exec'
+    API_URL: 'https://script.google.com/macros/s/AKfycbwtcJdN60aa3sbe-CGyqGSj72g7AH47dNJySyNk41pS_3Q7e-M03wfQSumNxItNgP_-yw/exec'
   });
 
   const state = {
