@@ -1,6 +1,111 @@
 (() => {
   'use strict';
 
+    /*
+   * ============================================================
+   * APPS SCRIPT CALLBACK
+   * ============================================================
+   *
+   * Apps Script mengarahkan iframe kembali ke GitHub Pages
+   * dengan response di URL fragment:
+   *
+   * #api_cb=BASE64_DATA
+   *
+   * Karena callback sekarang berasal dari GitHub Pages sendiri,
+   * iframe menjadi same-origin dengan halaman utama sehingga
+   * postMessage dapat dikirim dengan stabil.
+   * ============================================================
+   */
+
+  function handleApiCallback() {
+    const hash = window.location.hash || '';
+
+    if (!hash.startsWith('#api_cb=')) {
+      return false;
+    }
+
+    try {
+      const encoded = decodeURIComponent(
+        hash.slice('#api_cb='.length)
+      );
+
+      /*
+       * Base64 URL-safe -> Base64 normal
+       */
+      let base64 = encoded
+        .replace(/-/g, '+')
+        .replace(/_/g, '/');
+
+      while (base64.length % 4 !== 0) {
+        base64 += '=';
+      }
+
+      const binary = window.atob(base64);
+
+      const bytes = new Uint8Array(
+        binary.length
+      );
+
+      for (
+        let i = 0;
+        i < binary.length;
+        i += 1
+      ) {
+        bytes[i] = binary.charCodeAt(i);
+      }
+
+      const json = new TextDecoder(
+        'utf-8'
+      ).decode(bytes);
+
+      const message = JSON.parse(json);
+
+      /*
+       * Kirim response ke halaman utama.
+       */
+      if (
+        window.parent &&
+        window.parent !== window
+      ) {
+        window.parent.postMessage(
+          message,
+          'https://fadhilarif.github.io'
+        );
+      }
+
+      /*
+       * Hapus fragment agar tidak mengganggu
+       * history browser.
+       */
+      window.history.replaceState(
+        null,
+        document.title,
+        window.location.pathname +
+          window.location.search
+      );
+
+      return true;
+    } catch (error) {
+      console.error(
+        'API callback error:',
+        error
+      );
+
+      return true;
+    }
+  }
+
+  /*
+   * Kalau file ini sedang dijalankan di iframe
+   * sebagai callback API, jangan boot aplikasi penuh.
+   */
+  if (
+    window !== window.top &&
+    handleApiCallback()
+  ) {
+    return;
+  }
+
   /*
    * ============================================================
    * KRAEPELIN PRACTICE - FRONTEND APPLICATION
