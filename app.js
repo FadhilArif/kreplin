@@ -118,16 +118,15 @@
 
   const $ = (id) => document.getElementById(id);
 
-const views = {
-  landing: $('landingView'),
-  auth: $('authView'),
-  dashboard: $('dashboardView'),
-  instruction: $('instructionView'),
-  test: $('testView'),
-  result: $('resultView'),
-  history: $('historyView'),
-  admin: $('adminView'),
-};
+  const views = {
+    landing: $('landingView'),
+    auth: $('authView'),
+    dashboard: $('dashboardView'),
+    instruction: $('instructionView'),
+    test: $('testView'),
+    result: $('resultView'),
+    history: $('historyView'),
+  };
 
   const state = {
     session: null,
@@ -377,7 +376,9 @@ const views = {
       }, 700);
 
       overallTimeoutId = setTimeout(() => {
-        finish(reject, new Error('Backend tidak merespons dalam waktu yang ditentukan. Pastikan deployment Apps Script terbaru sudah dipublikasikan.'));
+        const timeoutError = new Error('BACKEND_TIMEOUT');
+        timeoutError.code = 'BACKEND_TIMEOUT';
+        finish(reject, timeoutError);
       }, timeoutMs);
 
       try {
@@ -403,8 +404,8 @@ const views = {
     });
   }
 
-  async function apiChecked(action, payload = {}) {
-    const result = await api(action, payload);
+  async function apiChecked(action, payload = {}, timeoutMs = 20000) {
+    const result = await api(action, payload, timeoutMs);
 
     if (!result?.success) {
       throw new Error(result?.message || 'Permintaan backend gagal.');
@@ -1328,15 +1329,57 @@ const views = {
 
     busy(button, 'Memeriksa…', true);
 
+    let lastError = null;
+    const maxAttempts = 3;
+
     try {
-      const response = await apiChecked('login', { username, password });
-      state.session = response.session;
-      state.isGuest = false;
-      saveSession();
-      $('loginForm').reset();
-      await goDashboard('Login berhasil.');
+      for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        try {
+          const response = await apiChecked(
+            'login',
+            { username, password },
+            20000
+          );
+
+          state.session = response.session;
+          state.isGuest = false;
+          saveSession();
+          $('loginForm').reset();
+          await goDashboard('Login berhasil.');
+          return;
+        } catch (errorObject) {
+          lastError = errorObject;
+
+          const isBackendTimeout =
+            errorObject?.code === 'BACKEND_TIMEOUT' ||
+            errorObject?.message === 'BACKEND_TIMEOUT';
+
+          // Hanya retry kalau jalur backend timeout.
+          // Salah username/password tidak perlu menunggu 3 kali.
+          if (!isBackendTimeout || attempt >= maxAttempts) {
+            throw errorObject;
+          }
+
+          error.textContent =
+            `Mohon tunggu… mencoba lagi (${attempt}/${maxAttempts - 1})`;
+
+          await new Promise((resolve) =>
+            setTimeout(resolve, 1000 * attempt)
+          );
+        }
+      }
     } catch (errorObject) {
-      error.textContent = errorObject.message || 'Login gagal.';
+      const isBackendTimeout =
+        errorObject?.code === 'BACKEND_TIMEOUT' ||
+        errorObject?.message === 'BACKEND_TIMEOUT';
+
+      if (isBackendTimeout || lastError?.code === 'BACKEND_TIMEOUT') {
+        error.textContent =
+          'Mohon tunggu / silakan refresh dan isi kembali.';
+      } else {
+        error.textContent =
+          errorObject.message || 'Login gagal.';
+      }
     } finally {
       busy(button, '', false);
     }
