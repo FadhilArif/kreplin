@@ -421,57 +421,348 @@
       .replaceAll(')', ']');
   }
 
-  function createPdfBytes(content) {
+  function asciiBytes(value) {
+    return new TextEncoder().encode(String(value));
+  }
+
+  function concatBytes(parts) {
+    const total = parts.reduce(
+      (sum, part) => sum + part.length,
+      0
+    );
+
+    const output = new Uint8Array(total);
+    let offset = 0;
+
+    parts.forEach((part) => {
+      output.set(part, offset);
+      offset += part.length;
+    });
+
+    return output;
+  }
+
+  function createPdfBytes(content, imageBytes, imageWidth, imageHeight) {
+    const pageWidth = 595;
+    const pageHeight = 842;
+
     const objects = [
       '<< /Type /Catalog /Pages 2 0 R >>',
       '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
-      '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>',
-      `<< /Length ${content.length} >>\nstream\n${content}\nendstream`,
+      '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 5 0 R >> /XObject << /Im1 6 0 R >> >> /Contents 4 0 R >>',
+      null,
       '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+      null,
     ];
 
-    let pdf = '%PDF-1.4\n';
+    const contentBytes = asciiBytes(content);
+
+    objects[3] =
+      `<< /Length ${contentBytes.length} >>\nstream\n` +
+      content +
+      '\nendstream';
+
+    objects[5] =
+      `<< /Type /XObject /Subtype /Image /Width ${imageWidth} /Height ${imageHeight} ` +
+      `/ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${imageBytes.length} >>\n` +
+      'stream';
+
+    const parts = [];
     const offsets = [0];
 
-    objects.forEach((object, index) => {
-      offsets[index + 1] = pdf.length;
-      pdf += `${index + 1} 0 obj\n${object}\nendobj\n`;
-    });
+    const header = asciiBytes('%PDF-1.4\n');
+    parts.push(header);
 
-    const xrefOffset = pdf.length;
-    pdf += `xref\n0 ${objects.length + 1}\n`;
-    pdf += '0000000000 65535 f \n';
+    for (let index = 0; index < objects.length; index += 1) {
+      const objectNumber = index + 1;
+      offsets[objectNumber] = parts.reduce(
+        (sum, part) => sum + part.length,
+        0
+      );
 
-    for (let i = 1; i <= objects.length; i += 1) {
-      pdf += `${String(offsets[i]).padStart(10, '0')} 00000 n \n`;
+      parts.push(
+        asciiBytes(
+          `${objectNumber} 0 obj\n${objects[index]}\n`
+        )
+      );
+
+      if (objectNumber === 6) {
+        parts.push(imageBytes);
+        parts.push(asciiBytes('\nendstream\nendobj\n'));
+      } else {
+        parts.push(asciiBytes('endobj\n'));
+      }
     }
 
-    pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\n`;
-    pdf += `startxref\n${xrefOffset}\n%%EOF`;
+    const xrefOffset = parts.reduce(
+      (sum, part) => sum + part.length,
+      0
+    );
 
-    return new TextEncoder().encode(pdf);
+    let xref = `xref\n0 ${objects.length + 1}\n`;
+    xref += '0000000000 65535 f \n';
+
+    for (let index = 1; index <= objects.length; index += 1) {
+      xref += `${String(offsets[index]).padStart(10, '0')} 00000 n \n`;
+    }
+
+    xref +=
+      `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\n` +
+      `startxref\n${xrefOffset}\n%%EOF`;
+
+    parts.push(asciiBytes(xref));
+
+    return concatBytes(parts);
   }
 
-  function buildPdf(result, participant) {
-    const lines = [
-      'BT',
-      '/F1 20 Tf',
-      '50 790 Td',
-      '(Hasil Latihan Psikotes) Tj',
-      '/F1 10 Tf',
-      '0 -28 Td',
-      `(Peserta: ${pdfEscape(participant)}) Tj`,
-      '0 -16 Td',
-      `(Tes: ${pdfEscape(TESTS[result.type].name)} - Paket ${pdfEscape(result.package)}) Tj`,
-      '0 -16 Td',
-      `(Tanggal: ${pdfEscape(formatDate(result.tanggal))}) Tj`,
-      '0 -28 Td',
-      '/F1 13 Tf',
-      '(Ringkasan Performa) Tj',
-      '/F1 10 Tf',
-    ];
+  function drawPdfText(lines, text, x, y, size = 10) {
+    lines.push('BT');
+    lines.push(`/F1 ${size} Tf`);
+    lines.push(`${x.toFixed(2)} ${y.toFixed(2)} Td`);
+    lines.push(`(${pdfEscape(text)}) Tj`);
+    lines.push('ET');
+  }
 
-    const rows = [
+  function drawPdfLine(lines, x1, y1, x2, y2) {
+    lines.push(`${x1.toFixed(2)} ${y1.toFixed(2)} m`);
+    lines.push(`${x2.toFixed(2)} ${y2.toFixed(2)} l`);
+    lines.push('S');
+  }
+
+  function drawPdfRect(lines, x, y, width, height, stroke = true) {
+    lines.push(
+      `${x.toFixed(2)} ${y.toFixed(2)} ${width.toFixed(2)} ${height.toFixed(2)} re`
+    );
+    lines.push(stroke ? 'S' : 'f');
+  }
+
+  function buildMcqPdfChart(lines, result) {
+    const data = result.chart.slice(0, 20);
+    const chartX = 60;
+    const chartY = 265;
+    const chartWidth = 475;
+    const chartHeight = 150;
+    const maxTime = CONFIG.MCQ_SECONDS;
+    const gap = 4;
+    const barWidth = Math.max(
+      6,
+      (chartWidth - gap * (data.length - 1)) / data.length
+    );
+
+    lines.push('0.85 0.89 0.94 RG');
+    drawPdfLine(
+      lines,
+      chartX,
+      chartY,
+      chartX,
+      chartY + chartHeight
+    );
+    drawPdfLine(
+      lines,
+      chartX,
+      chartY,
+      chartX + chartWidth,
+      chartY
+    );
+
+    lines.push('0.92 0.94 0.97 RG');
+    [0, 10, 20, 30].forEach((seconds) => {
+      const ratio = 1 - seconds / maxTime;
+      const y = chartY + ratio * chartHeight;
+      drawPdfLine(
+        lines,
+        chartX,
+        y,
+        chartX + chartWidth,
+        y
+      );
+    });
+
+    drawPdfText(lines, '0s', 38, chartY + chartHeight - 3, 7);
+    drawPdfText(lines, '10s', 34, chartY + chartHeight * (2 / 3) - 3, 7);
+    drawPdfText(lines, '20s', 34, chartY + chartHeight * (1 / 3) - 3, 7);
+    drawPdfText(lines, '30s', 34, chartY - 3, 7);
+
+    data.forEach((item, index) => {
+      const time = Math.max(
+        0,
+        Math.min(
+          maxTime,
+          Number(item?.time || 0)
+        )
+      );
+
+      const performance =
+        1 - time / maxTime;
+
+      const barHeight = Math.max(
+        2,
+        performance * chartHeight
+      );
+
+      const x =
+        chartX +
+        index * (barWidth + gap);
+
+      if (item?.correct) {
+        lines.push('0.18 0.49 0.95 rg');
+      } else {
+        lines.push('0.88 0.27 0.30 rg');
+      }
+
+      lines.push(
+        `${x.toFixed(2)} ${chartY.toFixed(2)} ${barWidth.toFixed(2)} ${barHeight.toFixed(2)} re f`
+      );
+
+      drawPdfText(
+        lines,
+        String(index + 1),
+        x + barWidth / 2 - 2,
+        chartY - 14,
+        7
+      );
+    });
+
+    drawPdfText(
+      lines,
+      'Biru = benar   Merah = salah / kosong',
+      chartX,
+      chartY - 30,
+      8
+    );
+  }
+
+  function buildKraepelinPdfChart(lines, result) {
+    const data = result.chart.slice(0, 50);
+    const chartX = 60;
+    const chartY = 270;
+    const chartWidth = 475;
+    const chartHeight = 145;
+    const max = Math.max(1, ...data);
+    const gap = 2;
+    const barWidth = Math.max(
+      4,
+      (chartWidth - gap * (data.length - 1)) / data.length
+    );
+
+    lines.push('0.85 0.89 0.94 RG');
+    drawPdfLine(
+      lines,
+      chartX,
+      chartY,
+      chartX,
+      chartY + chartHeight
+    );
+    drawPdfLine(
+      lines,
+      chartX,
+      chartY,
+      chartX + chartWidth,
+      chartY
+    );
+
+    lines.push('0.18 0.49 0.95 rg');
+
+    data.forEach((value, index) => {
+      const barHeight =
+        (Number(value || 0) / max) *
+        chartHeight;
+
+      const x =
+        chartX +
+        index * (barWidth + gap);
+
+      lines.push(
+        `${x.toFixed(2)} ${chartY.toFixed(2)} ${barWidth.toFixed(2)} ${barHeight.toFixed(2)} re f`
+      );
+    });
+
+    drawPdfText(
+      lines,
+      `0 - ${max} jawaban per kolom`,
+      chartX,
+      chartY - 18,
+      8
+    );
+  }
+
+  async function buildPdf(result, participant) {
+    const templateResponse = await fetch(
+      './pdf-template.jpg',
+      { cache: 'no-cache' }
+    );
+
+    if (!templateResponse.ok) {
+      throw new Error(
+        `Template PDF tidak ditemukan (HTTP ${templateResponse.status}).`
+      );
+    }
+
+    const templateBuffer =
+      await templateResponse.arrayBuffer();
+
+    const templateBytes =
+      new Uint8Array(templateBuffer);
+
+    // Template merupakan JPEG A4 hasil rasterisasi dari template FA-Test.
+    // Rasio halaman dipertahankan 595 x 842 pt.
+    const templateWidth = 1241;
+    const templateHeight = 1755;
+
+    const lines = [];
+
+    // Background template.
+    lines.push('q');
+    lines.push('595 0 0 842 0 0 cm');
+    lines.push('/Im1 Do');
+    lines.push('Q');
+
+    // Warna dasar teks hasil.
+    lines.push('0.10 0.19 0.30 rg');
+
+    drawPdfText(
+      lines,
+      'Hasil Latihan Psikotes',
+      52,
+      686,
+      20
+    );
+
+    drawPdfText(
+      lines,
+      `Peserta: ${participant}`,
+      52,
+      662,
+      10
+    );
+
+    drawPdfText(
+      lines,
+      `Tes: ${TESTS[result.type].name} - Paket ${result.package}`,
+      52,
+      646,
+      10
+    );
+
+    drawPdfText(
+      lines,
+      `Tanggal: ${formatDate(result.tanggal)}`,
+      52,
+      630,
+      10
+    );
+
+    lines.push('0.18 0.49 0.95 rg');
+    drawPdfText(
+      lines,
+      'Ringkasan Performa',
+      52,
+      600,
+      13
+    );
+
+    // Dua baris ringkasan agar tetap rapi di atas chart.
+    const cards = [
       ['Skor utama', `${result.score}%`],
       ['Kecepatan', `${result.speed}%`],
       ['Ketelitian', `${result.accuracy}%`],
@@ -482,37 +773,116 @@
       ['Salah', String(result.wrong)],
     ];
 
-    rows.forEach(([label, value]) => {
-      lines.push('0 -18 Td');
-      lines.push(`(${pdfEscape(label)}: ${pdfEscape(value)}) Tj`);
+    const cardX = 52;
+    const cardW = 118;
+    const cardH = 40;
+    const cardGap = 6;
+
+    cards.forEach(([label, value], index) => {
+      const row = Math.floor(index / 4);
+      const col = index % 4;
+      const x = cardX + col * (cardW + cardGap);
+      const y = 540 - row * 50;
+
+      lines.push('0.95 0.97 0.99 rg');
+      drawPdfRect(
+        lines,
+        x,
+        y,
+        cardW,
+        cardH,
+        false
+      );
+
+      lines.push('0.10 0.19 0.30 rg');
+      drawPdfText(
+        lines,
+        label,
+        x + 8,
+        y + 25,
+        7
+      );
+
+      lines.push('0.18 0.49 0.95 rg');
+      drawPdfText(
+        lines,
+        value,
+        x + 8,
+        y + 10,
+        12
+      );
     });
 
-    lines.push('0 -30 Td');
-    lines.push('/F1 13 Tf');
-    lines.push('(Grafik performa) Tj');
-    lines.push('/F1 8 Tf');
-    lines.push('0 -18 Td');
-    lines.push('(Skor internal latihan - bukan norma psikotes resmi.) Tj');
-    lines.push('ET');
+    lines.push('0.18 0.49 0.95 rg');
+    drawPdfText(
+      lines,
+      'Grafik performa',
+      52,
+      432,
+      13
+    );
 
-    const data = result.chart.slice(0, result.type === 'kraepelin' ? 50 : 20);
-    const max = Math.max(1, ...data);
-    const chartX = 50;
-    const chartY = 360;
-    const chartHeight = 130;
-    const chartWidth = 500;
-    const gap = result.type === 'kraepelin' ? 1.5 : 8;
-    const barWidth = Math.max(3, (chartWidth - gap * (data.length - 1)) / data.length);
+    lines.push('0.38 0.43 0.50 rg');
 
-    lines.push('0.16 0.49 0.95 rg');
+    if (result.type === 'kraepelin') {
+      drawPdfText(
+        lines,
+        'Semakin tinggi batang, semakin banyak soal yang berhasil dijawab pada kolom.',
+        52,
+        417,
+        8
+      );
+      buildKraepelinPdfChart(
+        lines,
+        result
+      );
+    } else {
+      drawPdfText(
+        lines,
+        'Semakin tinggi batang, semakin cepat waktu menjawab. Biru = benar, merah = salah/kosong.',
+        52,
+        417,
+        8
+      );
+      buildMcqPdfChart(
+        lines,
+        result
+      );
+    }
 
-    data.forEach((value, index) => {
-      const height = (value / max) * chartHeight;
-      const x = chartX + index * (barWidth + gap);
-      lines.push(`${x.toFixed(2)} ${chartY.toFixed(2)} ${barWidth.toFixed(2)} ${height.toFixed(2)} re f`);
-    });
+    lines.push('0.10 0.19 0.30 rg');
+    drawPdfText(
+      lines,
+      'Catatan',
+      52,
+      210,
+      10
+    );
 
-    return createPdfBytes(lines.join('\n'));
+    lines.push('0.38 0.43 0.50 rg');
+    drawPdfText(
+      lines,
+      'Skor di website ini adalah skor latihan internal. Gunakan untuk melihat',
+      52,
+      195,
+      8
+    );
+    drawPdfText(
+      lines,
+      'perkembangan latihan pribadi, bukan sebagai penilaian psikologis resmi.',
+      52,
+      183,
+      8
+    );
+
+    const content = lines.join('\n');
+
+    return createPdfBytes(
+      content,
+      templateBytes,
+      templateWidth,
+      templateHeight
+    );
   }
 
   // RANDOM
@@ -1809,9 +2179,11 @@ async function loadKuantitatifPackage(packageNumber) {
 
     ctx.font = '10px Inter, sans-serif';
 
-    [30, 20, 10, 0].forEach((seconds) => {
+    // Karena batang yang tinggi berarti waktu lebih cepat,
+    // skala waktu dibalik: 0s di atas, 30s di bawah.
+    [0, 10, 20, 30].forEach((seconds) => {
       const ratio = seconds / maxTime;
-      const y = height - bottom - ratio * chartHeight;
+      const y = height - bottom - (1 - ratio) * chartHeight;
 
       ctx.strokeStyle = '#edf2f7';
       ctx.beginPath();
@@ -1943,7 +2315,7 @@ async function loadKuantitatifPackage(packageNumber) {
   // PDF
   // ============================================================
 
-  function downloadPdf() {
+  async function downloadPdf() {
     const result = state.lastResult;
 
     if (!result) {
@@ -1958,7 +2330,7 @@ async function loadKuantitatifPackage(packageNumber) {
       const participant = state.isGuest
         ? 'Tamu'
         : state.session?.username || 'Peserta';
-      const bytes = buildPdf(result, participant);
+      const bytes = await buildPdf(result, participant);
       const blob = new Blob([bytes], { type: 'application/pdf' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
