@@ -1,57 +1,28 @@
-# Kraepelin Practice
+UPDATE PSYCHOTEST — PDF TEMPLATE + GRAFIK WAKTU
 
-Platform latihan Tes Kraepelin tanpa email login. Frontend berjalan di GitHub Pages dan backend memakai Google Apps Script + Google Sheets.
+Isi paket:
+- app.js
+  Versi yang sudah terintegrasi dengan bank soal JSON, pencatatan waktu menjawab,
+  grafik performa waktu (biru=benar, merah=salah/kosong), dan PDF template.
+- styles.css
+  CSS tampilan terbaru, termasuk tombol jawaban 2 kolom untuk teks panjang.
+- pdf-template.jpg
+  Background template FA-Test berdasarkan template PDF yang diberikan.
+- contoh-hasil-pdf.pdf
+  Contoh hasil PDF untuk preview.
 
-## Struktur Google Sheets
+CARA PASANG:
+1. Ganti app.js di repository GitHub dengan app.js dari paket ini.
+2. Ganti styles.css dengan styles.css dari paket ini.
+3. Tambahkan pdf-template.jpg ke root repository GitHub.
+4. Tidak perlu mengubah Code.gs.
+5. Tidak perlu mengubah file JSON bank soal.
+6. Commit/push lalu tunggu GitHub Pages selesai deploy.
 
-Spreadsheet ID:
-`1V_l6EZBGTu-ukTp0G8SIOqZvDxXViun-aSycwSFc_cM`
-
-Worksheet **User**:
-- `user-id`
-- `username`
-- `password_hash`
-- `salt`
-- `created_at`
-
-Worksheet **TestHistory**:
-- `test_id`
-- `user_id`
-- `tanggal`
-- `speed`
-- `accuracy`
-- `consistency`
-- `endurance`
-
-## Google Apps Script
-
-1. Buka Google Sheets → Extensions → Apps Script.
-2. Ganti isi `Code.gs` dengan file `Code.gs` pada project ini.
-3. Deploy → New deployment → Web app.
-4. Execute as: Me.
-5. Who has access: Anyone.
-6. Salin URL `/exec` yang diberikan Google.
-
-URL yang sudah dipasang di `app.js` saat project ini dibuat:
-`https://script.google.com/macros/s/AKfycbwtcJdN60aa3sbe-CGyqGSj72g7AH47dNJySyNk41pS_3Q7e-M03wfQSumNxItNgP_-yw/exec`
-
-Jika membuat deployment baru, ganti `CONFIG.API_URL` di `app.js`.
-
-## Fitur
-
-- Register username + password.
-- Password tidak disimpan sebagai plaintext di Sheet.
-- Login memakai session token.
-- Histori per akun disimpan di `TestHistory`.
-- Tes: 50 kolom × 26 soal × 15 detik/kolom.
-- Angka baru diacak setiap tes.
-- Refresh tidak sengaja saat tes berlangsung memulihkan progress dari browser.
-- Tombol Home saat tes membuka konfirmasi; jika dikonfirmasi, progress langsung dihapus/hangus dan tidak masuk histori.
-- Hasil akhir otomatis disimpan ke histori.
-- Halaman hasil dapat diunduh sebagai PDF.
-- Hasil halaman tidak disimpan setelah halaman hasil ditinggalkan/di-refresh; histori akun tetap tersimpan.
-- Responsive untuk monitor, laptop, tablet, dan handphone.
-
-## Catatan keamanan
-
-Google Sheets cocok untuk MVP atau penggunaan kecil. Untuk skala besar/produksi, pindahkan autentikasi dan histori ke database sungguhan. Jangan menyimpan password plaintext.
+CATATAN:
+- PDF sekarang memakai template FA-Test sebagai background halaman.
+- Grafik MCQ di PDF ikut menampilkan waktu menjawab tiap soal.
+- Batang lebih tinggi = waktu menjawab lebih cepat.
+- Biru = benar.
+- Merah = salah atau kosong.
+- PDF dibuat langsung di browser, tanpa library PDF eksternal.
