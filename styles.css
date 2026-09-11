@@ -603,39 +603,52 @@ body[data-view=test] .app-shell {
 }
 
 .keypad {
-  display:grid;
-  grid-template-columns:repeat(3,1fr);
-  gap:6px;
-  width:min(450px,100%);
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  width: min(760px, 100%);
+  align-items: stretch;
 }
 
-.digit-btn,.answer-btn {
-  min-height:46px;
-  border:1px solid var(--line);
-  border-radius:11px;
-  background:#fff;
-  color:#33455f;
-  font-weight:800;
-  cursor:pointer;
+.digit-btn,
+.answer-btn {
+  min-height: 52px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: #fff;
+  color: #33455f;
+  font-weight: 800;
+  cursor: pointer;
+  box-sizing: border-box;
 }
 
 .answer-btn {
-  padding:12px;
-  text-align:left;
+  width: 100%;
+  min-width: 0;
+  padding: 12px 14px;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  line-height: 1.35;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
 }
 
-.answer-btn:hover,.digit-btn:hover {
-  background:#f7faff;
+.answer-btn:hover,
+.digit-btn:hover {
+  background: #f7faff;
 }
 
 .answer-btn.correct {
-  border-color:#bfe4cf;
-  background:#effaf4;
+  border-color: #bfe4cf;
+  background: #effaf4;
 }
 
 .answer-btn.wrong {
-  border-color:#efc2be;
-  background:#fff3f2;
+  border-color: #efc2be;
+  background: #fff3f2;
 }
 
 .zero-btn {
