@@ -126,6 +126,7 @@
     test: $('testView'),
     result: $('resultView'),
     history: $('historyView'),
+    showView('admin');
   };
 
   const state = {
