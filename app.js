@@ -2,255 +2,192 @@
   'use strict';
 
   // ============================================================
-  // PSYCHOTEST PRACTICE - PHASE 4
-  // Google Sheets + dummy question bank + PDF fallback
+  // PSYCHOTEST PRACTICE — PHASE 4
+  // Multi-test + Google Sheets + PDF fallback
   // ============================================================
 
   const CONFIG = Object.freeze({
     API_URL:
       'https://script.google.com/macros/s/AKfycbwtcJdN60aa3sbe-CGyqGSj72g7AH47dNJySyNk41pS_3Q7e-M03wfQSumNxItNgP_-yw/exec',
-
     SESSION_KEY: 'psychotest_session_v2',
-
+    TEST_KEY: 'psychotest_active_v2',
+    PDF_TIMEOUT: 10000,
     KRAEPELIN_COLUMNS: 50,
     KRAEPELIN_QUESTIONS: 26,
-    KRAEPELIN_DIGITS: 27,
     KRAEPELIN_SECONDS: 15,
-
     MCQ_QUESTIONS: 20,
-    MCQ_SECONDS: 30
+    MCQ_SECONDS: 30,
   });
 
   const TESTS = {
     kraepelin: {
       name: 'Kraepelin',
       icon: '🧮',
-      description:
-        'Latihan ritme kerja, kecepatan, ketelitian, konsistensi, dan ketahanan.',
-      kind: 'kraepelin'
+      description: 'Latihan ritme kerja, kecepatan, ketelitian, konsistensi, dan ketahanan.',
+      kind: 'kraepelin',
     },
     kuantitatif: {
       name: 'Kuantitatif',
       icon: '➗',
-      description:
-        'Latihan hitungan dasar, persentase, rasio, dan operasi numerik.',
-      kind: 'mcq'
+      description: 'Latihan hitungan dasar, persentase, rasio, dan operasi numerik.',
+      kind: 'mcq',
     },
     numerical: {
       name: 'Numerical',
       icon: '🔢',
-      description:
-        'Latihan pola angka, deret, perbandingan, dan penalaran numerik.',
-      kind: 'mcq'
+      description: 'Latihan pola angka, deret, perbandingan, dan penalaran numerik.',
+      kind: 'mcq',
     },
     sinonim: {
       name: 'Sinonim Verbal',
       icon: '🔤',
-      description:
-        'Latihan memahami persamaan makna kata dalam konteks psikotes.',
-      kind: 'mcq'
+      description: 'Latihan memahami persamaan makna kata dalam konteks psikotes.',
+      kind: 'mcq',
     },
     silogisme: {
       name: 'Silogisme',
       icon: '🧠',
-      description:
-        'Latihan menarik kesimpulan logis dari beberapa premis.',
-      kind: 'mcq'
+      description: 'Latihan menarik kesimpulan logis dari beberapa premis.',
+      kind: 'mcq',
     },
     analogi: {
       name: 'Analogi',
       icon: '🔗',
-      description:
-        'Latihan hubungan kata dan konsep secara analogis.',
-      kind: 'mcq'
+      description: 'Latihan hubungan kata dan konsep secara analogis.',
+      kind: 'mcq',
     },
     kognitif: {
       name: 'Tes Kognitif',
       icon: '🧩',
-      description:
-        'Latihan gabungan perhatian, logika, memori, dan pemecahan masalah.',
-      kind: 'mcq'
-    }
+      description: 'Latihan gabungan perhatian, logika, memori, dan pemecahan masalah.',
+      kind: 'mcq',
+    },
   };
 
-  // ------------------------------------------------------------
-  // DUMMY QUESTIONS
-  // Paket 1-3 memakai bank dummy yang sama sementara.
-  // ------------------------------------------------------------
-
+  // Dummy bank sementara. Nanti dipindah ke JSON/GitHub pada fase bank soal.
   const SAMPLE = {
     kuantitatif: [
       ['12 + 8 = ?', ['18', '20', '22', '24'], 1],
       ['25% dari 80 = ?', ['15', '20', '25', '30'], 1],
       ['7 × 9 = ?', ['54', '56', '63', '72'], 2],
       ['144 ÷ 12 = ?', ['10', '11', '12', '14'], 2],
-      ['3/4 dari 40 = ?', ['20', '25', '30', '35'], 2]
+      ['3/4 dari 40 = ?', ['20', '25', '30', '35'], 2],
+      ['Jika 5 barang = 60.000, maka 8 barang = ?', ['84.000', '90.000', '96.000', '100.000'], 2],
     ],
-
     numerical: [
       ['Deret: 2, 4, 6, 8, …', ['9', '10', '11', '12'], 1],
       ['Deret: 3, 6, 12, 24, …', ['36', '42', '48', '54'], 2],
       ['Angka mana paling besar?', ['0,75', '0,8', '0,65', '0,7'], 1],
       ['Jika 5 buku = 50.000, 8 buku = ?', ['70.000', '75.000', '80.000', '90.000'], 2],
-      ['Deret: 20, 17, 14, 11, …', ['7', '8', '9', '10'], 1]
+      ['Deret: 20, 17, 14, 11, …', ['7', '8', '9', '10'], 1],
+      ['Deret: 1, 4, 9, 16, …', ['20', '24', '25', '27'], 2],
     ],
-
     sinonim: [
       ['Sinonim “akurat” adalah …', ['cepat', 'tepat', 'lambat', 'besar'], 1],
       ['Sinonim “konkret” adalah …', ['nyata', 'rumit', 'sementara', 'abstrak'], 0],
       ['Sinonim “efisien” adalah …', ['boros', 'hemat guna', 'lambat', 'acak'], 1],
       ['Sinonim “valid” adalah …', ['sah', 'lemah', 'samar', 'salah'], 0],
-      ['Sinonim “esensial” adalah …', ['tambahan', 'pokok', 'sementara', 'remeh'], 1]
+      ['Sinonim “esensial” adalah …', ['tambahan', 'pokok', 'sementara', 'remeh'], 1],
+      ['Sinonim “abstrak” adalah …', ['nyata', 'konkret', 'tidak berwujud', 'terukur'], 2],
     ],
-
     silogisme: [
-      ['Semua A adalah B. Semua B adalah C. Kesimpulan yang benar?',
-        ['Semua A adalah C', 'Semua C adalah A', 'Sebagian A bukan B', 'Tidak ada hubungan'], 0],
-      ['Semua dokter adalah pekerja. Rina adalah dokter. Maka …',
-        ['Rina bukan pekerja', 'Rina pekerja', 'Semua pekerja dokter', 'Tidak dapat disimpulkan'], 1],
-      ['Semua X adalah Y. Tidak ada Y yang Z. Maka …',
-        ['X adalah Z', 'Tidak ada X yang Z', 'Semua Z adalah X', 'Sebagian X pasti Z'], 1],
-      ['Sebagian P adalah Q. Semua Q adalah R. Maka …',
-        ['Sebagian P adalah R', 'Semua P adalah R', 'Tidak ada P yang R', 'Semua R adalah P'], 0],
-      ['Semua M adalah N. Sebagian N adalah O. Maka …',
-        ['Semua M adalah O', 'Sebagian M pasti O', 'Mungkin sebagian M adalah O', 'Tidak ada N yang M'], 2]
+      ['Semua A adalah B. Semua B adalah C. Kesimpulan yang benar?', ['Semua A adalah C', 'Semua C adalah A', 'Sebagian A bukan B', 'Tidak ada hubungan'], 0],
+      ['Semua dokter adalah pekerja. Rina adalah dokter. Maka …', ['Rina bukan pekerja', 'Rina pekerja', 'Semua pekerja dokter', 'Tidak dapat disimpulkan'], 1],
+      ['Semua X adalah Y. Tidak ada Y yang Z. Maka …', ['X adalah Z', 'Tidak ada X yang Z', 'Semua Z adalah X', 'Sebagian X pasti Z'], 1],
+      ['Sebagian P adalah Q. Semua Q adalah R. Maka …', ['Sebagian P adalah R', 'Semua P adalah R', 'Tidak ada P yang R', 'Semua R adalah P'], 0],
+      ['Semua M adalah N. Sebagian N adalah O. Maka …', ['Semua M adalah O', 'Sebagian M pasti O', 'Mungkin sebagian M adalah O', 'Tidak ada N yang M'], 2],
+      ['Semua siswa rajin lulus. Budi siswa. Kesimpulan?', ['Budi pasti lulus', 'Budi tidak lulus', 'Budi pasti malas', 'Tidak bisa menyimpulkan'], 0],
     ],
-
     analogi: [
       ['Buku : Membaca = Makanan : …', ['memasak', 'makan', 'membeli', 'menjual'], 1],
       ['Dokter : Rumah sakit = Guru : …', ['pasar', 'sekolah', 'bank', 'terminal'], 1],
       ['Panas : Dingin = Tinggi : …', ['besar', 'jauh', 'rendah', 'panjang'], 2],
       ['Mata : Melihat = Telinga : …', ['berbicara', 'mendengar', 'berjalan', 'menulis'], 1],
-      ['Kunci : Pintu = Password : …', ['akun', 'meja', 'buku', 'kursi'], 0]
+      ['Kunci : Pintu = Password : …', ['akun', 'meja', 'buku', 'kursi'], 0],
+      ['Pensil : Menulis = Gunting : …', ['mengukur', 'memotong', 'melipat', 'menempel'], 1],
     ],
-
     kognitif: [
       ['Jika semua lampu mati, ruangan menjadi …', ['terang', 'gelap', 'ramai', 'dingin'], 1],
       ['Manakah yang berbeda?', ['Apel', 'Mangga', 'Wortel', 'Jeruk'], 2],
       ['Jika hari ini Senin, 3 hari lagi adalah …', ['Selasa', 'Rabu', 'Kamis', 'Jumat'], 2],
       ['Pola: ▲ ● ▲ ● … berikutnya?', ['▲', '●', '■', '◆'], 0],
-      ['Jika A lebih besar dari B dan B lebih besar dari C, maka …', ['A<C', 'A=C', 'A>C', 'B<A tidak pasti'], 2]
-    ]
+      ['Jika A lebih besar dari B dan B lebih besar dari C, maka …', ['A<C', 'A=C', 'A>C', 'B<A tidak pasti'], 2],
+      ['Manakah yang termasuk pola berulang?', ['A-B-A-B', 'A-A-B-C', 'A-B-C-D', 'A-C-B-D'], 0],
+    ],
+  };
+
+  const $ = (id) => document.getElementById(id);
+
+  const views = {
+    landing: $('landingView'),
+    auth: $('authView'),
+    dashboard: $('dashboardView'),
+    instruction: $('instructionView'),
+    test: $('testView'),
+    result: $('resultView'),
+    history: $('historyView'),
   };
 
   const state = {
     session: null,
     isGuest: false,
-
+    history: [],
     test: null,
     package: 1,
-
+    currentTestId: null,
     questions: [],
     answers: [],
     index: 0,
-
     columns: [],
-    columnIndex: 0,
-    questionIndex: 0,
-
+    colIndex: 0,
+    qIndex: 0,
     timerId: null,
-    startedAt: 0,
-
+    testStartedAt: 0,
     lastResult: null,
-    locked: false,
-    finished: false
+    finished: true,
+    savingHistory: false,
   };
 
-  const $ = (id) => document.getElementById(id);
-
-  const views = [
-    'landing',
-    'auth',
-    'dashboard',
-    'instruction',
-    'test',
-    'result',
-    'history'
-  ];
+  let apiFrame = null;
+  const apiWaiters = new Map();
 
   // ============================================================
-  // VIEW
+  // VIEW / TOAST
   // ============================================================
 
   function showView(name) {
-    views.forEach((view) => {
-      $(view + 'View')?.classList.remove('active');
-    });
-
-    $(name + 'View')?.classList.add('active');
+    Object.values(views).forEach((view) => view?.classList.remove('active'));
+    views[name]?.classList.add('active');
     document.body.dataset.view = name;
-
-    if (name !== 'test') {
-      stopTimer();
-    }
-
+    document.body.dataset.mode = state.isGuest ? 'guest' : 'account';
+    if (name !== 'test') stopTimer();
     window.scrollTo(0, 0);
   }
 
-  // ============================================================
-  // TOAST
-  // ============================================================
-
-  function toast(message, type = 'info', duration = 2600) {
+  function toast(message, type = 'info', duration = 2800) {
     const root = $('toastRoot');
-
-    if (!root) {
-      return;
-    }
+    if (!root) return;
 
     root.innerHTML = '';
-
     const el = document.createElement('div');
-    el.className = 'toast';
+    el.className = `toast ${type}`;
     el.textContent = message;
-
-    if (type === 'success') {
-      el.classList.add('success');
-    }
-
-    if (type === 'warning') {
-      el.classList.add('warning');
-    }
-
     root.appendChild(el);
 
-    window.setTimeout(() => {
-      el.remove();
-    }, duration);
+    setTimeout(() => el.remove(), duration);
   }
 
-  // ============================================================
-  // RANDOM
-  // ============================================================
+  function busy(button, label, isBusy) {
+    if (!button) return;
 
-  function randomInt(max) {
-    if (
-      window.crypto &&
-      typeof window.crypto.getRandomValues === 'function'
-    ) {
-      const array = new Uint32Array(1);
-      window.crypto.getRandomValues(array);
-
-      const limit =
-        Math.floor(0x100000000 / max) * max;
-
-      if (array[0] < limit) {
-        return array[0] % max;
-      }
+    if (isBusy) {
+      button.dataset.originalText = button.textContent;
+      button.disabled = true;
+      button.textContent = label;
+    } else {
+      button.disabled = false;
+      button.textContent = button.dataset.originalText || button.textContent;
     }
-
-    return Math.floor(Math.random() * max);
-  }
-
-  function shuffle(array) {
-    const copy = [...array];
-
-    for (let i = copy.length - 1; i > 0; i -= 1) {
-      const j = randomInt(i + 1);
-      [copy[i], copy[j]] = [copy[j], copy[i]];
-    }
-
-    return copy;
   }
 
   // ============================================================
@@ -263,56 +200,40 @@
       return;
     }
 
-    localStorage.setItem(
-      CONFIG.SESSION_KEY,
-      JSON.stringify(state.session)
-    );
+    localStorage.setItem(CONFIG.SESSION_KEY, JSON.stringify(state.session));
   }
 
   function loadSession() {
     try {
-      const raw = localStorage.getItem(CONFIG.SESSION_KEY);
-
-      if (!raw) {
-        return null;
-      }
-
-      const session = JSON.parse(raw);
-
-      if (
-        !session?.token ||
-        !session?.user_id ||
-        !session?.username
-      ) {
-        return null;
-      }
-
+      const session = JSON.parse(localStorage.getItem(CONFIG.SESSION_KEY) || 'null');
+      if (!session?.token || !session?.user_id || !session?.username) return null;
       return session;
-    } catch (error) {
-      console.warn('Session tidak valid:', error);
+    } catch {
       return null;
     }
   }
 
+  function clearSession() {
+    state.session = null;
+    localStorage.removeItem(CONFIG.SESSION_KEY);
+  }
+
   // ============================================================
-  // GOOGLE APPS SCRIPT API
-  //
-  // Tidak menggunakan fetch CORS.
-  // POST dikirim melalui hidden iframe + form.
-  // Apps Script mengembalikan HTML kecil yang melakukan
-  // window.parent.postMessage(...).
+  // GOOGLE APPS SCRIPT CONNECTOR
+  // POST -> hidden iframe
+  // Response -> postMessage langsung dari Apps Script
   // ============================================================
 
-  function createHiddenFrame() {
-    const iframe = document.createElement('iframe');
+  function ensureApiFrame() {
+    if (apiFrame?.contentWindow) return apiFrame;
 
-    iframe.name =
-      `api_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    apiFrame = document.createElement('iframe');
+    apiFrame.name = 'psychotestApiFrame';
+    apiFrame.title = 'Backend connector';
+    apiFrame.setAttribute('aria-hidden', 'true');
+    apiFrame.tabIndex = -1;
 
-    iframe.setAttribute('aria-hidden', 'true');
-    iframe.tabIndex = -1;
-
-    Object.assign(iframe.style, {
+    Object.assign(apiFrame.style, {
       position: 'fixed',
       width: '1px',
       height: '1px',
@@ -320,200 +241,298 @@
       opacity: '0',
       pointerEvents: 'none',
       left: '-10000px',
-      top: '-10000px'
+      top: '-10000px',
     });
 
-    document.body.appendChild(iframe);
-
-    return iframe;
+    document.body.appendChild(apiFrame);
+    return apiFrame;
   }
 
   function makeNonce() {
-    if (
-      window.crypto &&
-      typeof window.crypto.getRandomValues === 'function'
-    ) {
-      const buffer = new Uint32Array(3);
+    if (window.crypto?.getRandomValues) {
+      const buffer = new Uint32Array(4);
       window.crypto.getRandomValues(buffer);
-
       return Array.from(buffer)
         .map((value) => value.toString(16).padStart(8, '0'))
         .join('-');
     }
 
-    return (
-      `${Date.now().toString(36)}-` +
-      Math.random().toString(36).slice(2) +
-      Math.random().toString(36).slice(2)
-    );
+    return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
   }
 
-  function api(action, data = {}, timeoutMs = 20000) {
+  window.addEventListener('message', (event) => {
+    if (!apiFrame || event.source !== apiFrame.contentWindow) return;
+
+    const message = event.data;
+    if (!message || message.type !== 'PSYCHOTEST_API_RESPONSE' || !message.nonce) {
+      return;
+    }
+
+    const waiter = apiWaiters.get(message.nonce);
+    if (!waiter) return;
+
+    apiWaiters.delete(message.nonce);
+    clearTimeout(waiter.timeoutId);
+
+    if (message.ok === false) {
+      waiter.reject(new Error(message.error || 'Backend tidak dapat memproses permintaan.'));
+      return;
+    }
+
+    waiter.resolve(message.data);
+  });
+
+  function api(action, payload = {}, timeoutMs = 20000) {
     return new Promise((resolve, reject) => {
-      const iframe = createHiddenFrame();
+      if (!CONFIG.API_URL) {
+        reject(new Error('URL backend belum dikonfigurasi.'));
+        return;
+      }
+
+      const frame = ensureApiFrame();
       const nonce = makeNonce();
 
-      let settled = false;
-
-      const cleanup = () => {
-        window.removeEventListener('message', onMessage);
-
-        window.setTimeout(() => {
-          iframe.remove();
-        }, 100);
-      };
-
-      const finish = (fn, value) => {
-        if (settled) {
-          return;
-        }
-
-        settled = true;
-        window.clearTimeout(timeoutId);
-        cleanup();
-        fn(value);
-      };
-
-      const onMessage = (event) => {
-        if (
-          event.source !== iframe.contentWindow
-        ) {
-          return;
-        }
-
-        const message = event.data;
-
-        if (
-          !message ||
-          message.type !== 'PSYCHOTEST_API_RESPONSE' ||
-          String(message.nonce || '') !== nonce
-        ) {
-          return;
-        }
-
-        if (message.ok === true && message.data) {
-          finish(resolve, message.data);
-          return;
-        }
-
-        finish(
-          reject,
-          new Error(
-            message.error ||
-            message.data?.message ||
-            'Backend gagal memproses permintaan.'
-          )
-        );
-      };
-
-      const timeoutId = window.setTimeout(() => {
-        finish(
-          reject,
-          new Error('Backend tidak merespons dalam 20 detik.')
-        );
-      }, timeoutMs);
-
-      window.addEventListener('message', onMessage);
-
       const form = document.createElement('form');
-
       form.method = 'POST';
       form.action = CONFIG.API_URL;
-      form.target = iframe.name;
+      form.target = frame.name;
+      form.enctype = 'application/x-www-form-urlencoded';
       form.style.display = 'none';
 
-      const payload = {
-        ...data,
+      const dataInput = document.createElement('input');
+      dataInput.type = 'hidden';
+      dataInput.name = 'data';
+      dataInput.value = JSON.stringify({
         action,
-        nonce
-      };
+        ...payload,
+        nonce,
+      });
 
-      const field = document.createElement('input');
-      field.type = 'hidden';
-      field.name = 'data';
-      field.value = JSON.stringify(payload);
+      const nonceInput = document.createElement('input');
+      nonceInput.type = 'hidden';
+      nonceInput.name = 'nonce';
+      nonceInput.value = nonce;
 
-      form.appendChild(field);
+      form.append(dataInput, nonceInput);
       document.body.appendChild(form);
+
+      const timeoutId = setTimeout(() => {
+        apiWaiters.delete(nonce);
+        form.remove();
+        reject(new Error('Backend tidak merespons dalam 20 detik. Pastikan deployment Apps Script terbaru sudah dipublikasikan.'));
+      }, timeoutMs);
+
+      apiWaiters.set(nonce, { resolve, reject, timeoutId });
 
       try {
         form.submit();
       } catch (error) {
-        finish(reject, error);
-      } finally {
+        clearTimeout(timeoutId);
+        apiWaiters.delete(nonce);
         form.remove();
+        reject(new Error(`Gagal mengirim request: ${error.message || error}`));
+        return;
       }
+
+      setTimeout(() => form.remove(), 1500);
     });
   }
 
+  async function apiChecked(action, payload = {}) {
+    const result = await api(action, payload);
+
+    if (!result?.success) {
+      throw new Error(result?.message || 'Permintaan backend gagal.');
+    }
+
+    return result;
+  }
+
   // ============================================================
-  // GUEST
+  // PDF — NO EXTERNAL LIBRARY REQUIRED
   // ============================================================
 
-  function enterGuestMode() {
-    state.isGuest = true;
+  function pdfEscape(value) {
+    return String(value ?? '')
+      .replace(/[^\x20-\x7E]/g, '?')
+      .replaceAll('(', '[')
+      .replaceAll(')', ']');
+  }
+
+  function createPdfBytes(content) {
+    const objects = [
+      '<< /Type /Catalog /Pages 2 0 R >>',
+      '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+      '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>',
+      `<< /Length ${content.length} >>\nstream\n${content}\nendstream`,
+      '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+    ];
+
+    let pdf = '%PDF-1.4\n';
+    const offsets = [0];
+
+    objects.forEach((object, index) => {
+      offsets[index + 1] = pdf.length;
+      pdf += `${index + 1} 0 obj\n${object}\nendobj\n`;
+    });
+
+    const xrefOffset = pdf.length;
+    pdf += `xref\n0 ${objects.length + 1}\n`;
+    pdf += '0000000000 65535 f \n';
+
+    for (let i = 1; i <= objects.length; i += 1) {
+      pdf += `${String(offsets[i]).padStart(10, '0')} 00000 n \n`;
+    }
+
+    pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\n`;
+    pdf += `startxref\n${xrefOffset}\n%%EOF`;
+
+    return new TextEncoder().encode(pdf);
+  }
+
+  function buildPdf(result, participant) {
+    const lines = [
+      'BT',
+      '/F1 20 Tf',
+      '50 790 Td',
+      '(Hasil Latihan Psikotes) Tj',
+      '/F1 10 Tf',
+      '0 -28 Td',
+      `(Peserta: ${pdfEscape(participant)}) Tj`,
+      '0 -16 Td',
+      `(Tes: ${pdfEscape(TESTS[result.type].name)} - Paket ${pdfEscape(result.package)}) Tj`,
+      '0 -16 Td',
+      `(Tanggal: ${pdfEscape(formatDate(result.tanggal))}) Tj`,
+      '0 -28 Td',
+      '/F1 13 Tf',
+      '(Ringkasan Performa) Tj',
+      '/F1 10 Tf',
+    ];
+
+    const rows = [
+      ['Skor utama', `${result.score}%`],
+      ['Kecepatan', `${result.speed}%`],
+      ['Ketelitian', `${result.accuracy}%`],
+      ['Konsistensi', `${result.consistency}%`],
+      ['Ketahanan', `${result.endurance}%`],
+      ['Dijawab', `${result.answered}/${result.total}`],
+      ['Benar', String(result.correct)],
+      ['Salah', String(result.wrong)],
+    ];
+
+    rows.forEach(([label, value]) => {
+      lines.push('0 -18 Td');
+      lines.push(`(${pdfEscape(label)}: ${pdfEscape(value)}) Tj`);
+    });
+
+    lines.push('0 -30 Td');
+    lines.push('/F1 13 Tf');
+    lines.push('(Grafik performa) Tj');
+    lines.push('/F1 8 Tf');
+    lines.push('0 -18 Td');
+    lines.push('(Skor internal latihan - bukan norma psikotes resmi.) Tj');
+    lines.push('ET');
+
+    const data = result.chart.slice(0, result.type === 'kraepelin' ? 50 : 20);
+    const max = Math.max(1, ...data);
+    const chartX = 50;
+    const chartY = 360;
+    const chartHeight = 130;
+    const chartWidth = 500;
+    const gap = result.type === 'kraepelin' ? 1.5 : 8;
+    const barWidth = Math.max(3, (chartWidth - gap * (data.length - 1)) / data.length);
+
+    lines.push('0.16 0.49 0.95 rg');
+
+    data.forEach((value, index) => {
+      const height = (value / max) * chartHeight;
+      const x = chartX + index * (barWidth + gap);
+      lines.push(`${x.toFixed(2)} ${chartY.toFixed(2)} ${barWidth.toFixed(2)} ${height.toFixed(2)} re f`);
+    });
+
+    return createPdfBytes(lines.join('\n'));
+  }
+
+  // RANDOM
+  // ============================================================
+
+  function randomInt(max) {
+    if (window.crypto?.getRandomValues) {
+      const buffer = new Uint32Array(1);
+      window.crypto.getRandomValues(buffer);
+      return buffer[0] % max;
+    }
+    return Math.floor(Math.random() * max);
+  }
+
+  function shuffle(array) {
+    const result = [...array];
+    for (let i = result.length - 1; i > 0; i -= 1) {
+      const j = randomInt(i + 1);
+      [result[i], result[j]] = [result[j], result[i]];
+    }
+    return result;
+  }
+
+  function escapeHtml(value) {
+    return String(value).replace(/[&<>'"]/g, (char) => ({
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      "'": '&#39;',
+      '"': '&quot;',
+    })[char]);
+  }
+
+  // ============================================================
+  // GUEST / DASHBOARD
+  // ============================================================
+
+  function enterGuest() {
     state.session = null;
+    state.isGuest = true;
+    state.history = [];
     saveSession();
-
     $('welcomeName').textContent = 'Tamu';
-
     renderCatalog();
     showView('dashboard');
   }
 
-  function leaveGuestMode() {
+  function leaveGuest() {
     state.isGuest = false;
     state.session = null;
+    state.history = [];
   }
-
-  // ============================================================
-  // DASHBOARD
-  // ============================================================
 
   function renderCatalog() {
     const root = $('testCatalog');
-
-    if (!root) {
-      return;
-    }
+    if (!root) return;
 
     root.innerHTML = '';
 
     Object.entries(TESTS).forEach(([id, test]) => {
       const card = document.createElement('article');
-
       card.className = 'test-card card';
-
       card.innerHTML = `
         <div class="test-card-top">
           <div class="test-icon">${test.icon}</div>
-
           <div>
             <h3>${test.name}</h3>
             <p>${test.description}</p>
           </div>
         </div>
-
         <div class="package-row">
-          <select
-            class="package-select"
-            aria-label="Paket ${test.name}"
-          >
+          <select class="package-select" aria-label="Paket ${escapeHtml(test.name)}">
             <option value="1">Paket 1</option>
             <option value="2">Paket 2</option>
             <option value="3">Paket 3</option>
           </select>
-
-          <button class="primary-btn">
-            Mulai →
-          </button>
+          <button class="primary-btn" type="button">Mulai →</button>
         </div>
       `;
 
-      const button = card.querySelector('button');
       const select = card.querySelector('select');
-
-      button.addEventListener('click', () => {
+      card.querySelector('button').addEventListener('click', () => {
         openInstruction(id, Number(select.value));
       });
 
@@ -521,8 +540,214 @@
     });
   }
 
+  async function refreshHistory() {
+    if (state.isGuest || !state.session?.token) {
+      state.history = [];
+      return [];
+    }
+
+    try {
+      const response = await apiChecked('getHistory', {
+        token: state.session.token,
+      });
+
+      state.history = Array.isArray(response.history) ? response.history : [];
+      renderHistory();
+      renderDashboardSummary();
+      return state.history;
+    } catch (error) {
+      if (/sesi login/i.test(error.message)) {
+        clearSession();
+        state.isGuest = false;
+        showView('landing');
+      }
+      throw error;
+    }
+  }
+
+  function renderDashboardSummary() {
+    const count = state.history.length;
+    $('historyCount').textContent = String(count);
+
+    if (!count) {
+      $('latestDate').textContent = 'Belum ada tes';
+      $('dashSpeed').textContent = '—';
+      $('dashAccuracy').textContent = '—';
+      $('dashConsistency').textContent = '—';
+      $('dashEndurance').textContent = '—';
+      return;
+    }
+
+    const latest = state.history[0];
+    $('latestDate').textContent = formatDate(latest.tanggal);
+    $('dashSpeed').textContent = `${Number(latest.speed) || 0}%`;
+    $('dashAccuracy').textContent = `${Number(latest.accuracy) || 0}%`;
+    $('dashConsistency').textContent = `${Number(latest.consistency) || 0}%`;
+    $('dashEndurance').textContent = `${Number(latest.endurance) || 0}%`;
+  }
+
+  function formatDate(value) {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return String(value || '—');
+    return date.toLocaleString('id-ID');
+  }
+
+  function renderHistory() {
+    const body = $('historyTableBody');
+    if (!body) return;
+
+    const history = state.isGuest ? [] : state.history;
+    $('historyPageCount').textContent = String(history.length);
+    body.innerHTML = '';
+    $('emptyHistory').hidden = history.length > 0;
+    $('historyTable').hidden = history.length === 0;
+
+    history.forEach((item, index) => {
+      const row = document.createElement('tr');
+      row.innerHTML = `
+        <td>${index + 1}</td>
+        <td>${escapeHtml(formatDate(item.tanggal))}</td>
+        <td>${escapeHtml(TESTS[item.test_type]?.name || item.test_type || '—')}</td>
+        <td>${escapeHtml(item.package ?? '—')}</td>
+        <td>${Number(item.score) || 0}%</td>
+        <td>${Number(item.speed) || 0}%</td>
+        <td>${Number(item.accuracy) || 0}%</td>
+        <td>${Number(item.consistency) || 0}%</td>
+        <td>${Number(item.endurance) || 0}%</td>
+      `;
+      body.appendChild(row);
+    });
+  }
+
+  async function goDashboard(message = '') {
+    if (state.isGuest) {
+      renderCatalog();
+      showView('dashboard');
+      return;
+    }
+
+    if (!state.session) {
+      showView('landing');
+      return;
+    }
+
+    $('welcomeName').textContent = state.session.username;
+    renderCatalog();
+    showView('dashboard');
+
+    try {
+      await refreshHistory();
+    } catch (error) {
+      toast(`Histori belum bisa dimuat: ${error.message}`, 'warning', 4200);
+    }
+
+    if (message) toast(message, 'success');
+  }
+
   // ============================================================
-  // INSTRUCTION
+  // AUTH
+  // ============================================================
+
+  function showAuth(mode) {
+    const registerMode = mode === 'register';
+    $('loginPane').hidden = registerMode;
+    $('registerPane').hidden = !registerMode;
+    $('authTitle').textContent = registerMode ? 'Buat akun peserta' : 'Selamat datang kembali';
+    $('authSubtitle').textContent = registerMode
+      ? 'Akun digunakan untuk menyimpan histori latihan di Google Sheets.'
+      : 'Masuk untuk melanjutkan latihan dan melihat histori.';
+
+    $('loginError').textContent = '';
+    $('registerError').textContent = '';
+    showView('auth');
+
+    setTimeout(() => {
+      $(registerMode ? 'registerUsername' : 'loginUsername')?.focus();
+    }, 30);
+  }
+
+  async function register() {
+    const username = $('registerUsername').value.trim();
+    const password = $('registerPassword').value;
+    const confirm = $('registerConfirm').value;
+    const error = $('registerError');
+    const button = $('registerForm').querySelector('button[type="submit"]');
+    error.textContent = '';
+
+    if (!/^[A-Za-z0-9_]{3,24}$/.test(username)) {
+      error.textContent = 'Username 3–24 karakter: huruf, angka, underscore.';
+      return;
+    }
+    if (password.length < 8) {
+      error.textContent = 'Password minimal 8 karakter.';
+      return;
+    }
+    if (password !== confirm) {
+      error.textContent = 'Konfirmasi password belum sama.';
+      return;
+    }
+
+    busy(button, 'Membuat akun…', true);
+
+    try {
+      const response = await apiChecked('register', { username, password });
+      state.session = response.session;
+      state.isGuest = false;
+      saveSession();
+      $('registerForm').reset();
+      await goDashboard('Akun berhasil dibuat.');
+    } catch (errorObject) {
+      error.textContent = errorObject.message || 'Gagal membuat akun.';
+    } finally {
+      busy(button, '', false);
+    }
+  }
+
+  async function login() {
+    const username = $('loginUsername').value.trim();
+    const password = $('loginPassword').value;
+    const error = $('loginError');
+    const button = $('loginForm').querySelector('button[type="submit"]');
+    error.textContent = '';
+
+    if (!username || !password) {
+      error.textContent = 'Username dan password wajib diisi.';
+      return;
+    }
+
+    busy(button, 'Memeriksa…', true);
+
+    try {
+      const response = await apiChecked('login', { username, password });
+      state.session = response.session;
+      state.isGuest = false;
+      saveSession();
+      $('loginForm').reset();
+      await goDashboard('Login berhasil.');
+    } catch (errorObject) {
+      error.textContent = errorObject.message || 'Login gagal.';
+    } finally {
+      busy(button, '', false);
+    }
+  }
+
+  async function logout() {
+    try {
+      if (state.session?.token) {
+        await apiChecked('logout', { token: state.session.token });
+      }
+    } catch (_) {
+      // Logout lokal tetap dilakukan meskipun request backend gagal.
+    } finally {
+      clearSession();
+      leaveGuest();
+      showView('landing');
+      toast('Kamu sudah keluar.', 'info');
+    }
+  }
+
+  // ============================================================
+  // INSTRUCTIONS
   // ============================================================
 
   function openInstruction(testId, packageNumber) {
@@ -530,76 +755,37 @@
     state.package = packageNumber;
 
     const test = TESTS[testId];
-
-    $('instructionEyebrow').textContent =
-      `${test.name.toUpperCase()} • PAKET ${packageNumber}`;
-
+    $('instructionEyebrow').textContent = `${test.name.toUpperCase()} • PAKET ${packageNumber}`;
     $('instructionTitle').textContent = test.name;
-    $('instructionPackage').textContent =
-      `Paket ${packageNumber}`;
+    $('instructionPackage').textContent = `Paket ${packageNumber}`;
 
     if (test.kind === 'kraepelin') {
       $('instructionLead').innerHTML =
-        'Jumlahkan dua angka yang berdekatan dari ' +
-        '<strong>bawah ke atas</strong>. Masukkan ' +
-        '<strong>angka satuannya</strong>.';
-
+        'Jumlahkan dua angka yang berdekatan dari <strong>bawah ke atas</strong>. Masukkan <strong>angka satuannya</strong>.';
       $('instructionBody').innerHTML = `
         <div class="example-layout">
-          <div class="example-column">
-            8<br>
-            5<br>
-            7<br>
-            3
-          </div>
-
+          <div class="example-column">8<br>5<br>7<br>3</div>
           <div>→</div>
-
           <div class="example-results">
             <div>3 + 7 = 10 <strong>→ 0</strong></div>
             <div>7 + 5 = 12 <strong>→ 2</strong></div>
             <div>5 + 8 = 13 <strong>→ 3</strong></div>
           </div>
         </div>
-
         <div class="instruction-grid">
-          <div class="tip">
-            <b>50 kolom</b>
-            <small>Setiap kolom memiliki 26 jawaban.</small>
-          </div>
-
-          <div class="tip">
-            <b>15 detik</b>
-            <small>Waktu otomatis berpindah ke kolom berikutnya.</small>
-          </div>
+          <div class="tip"><b>50 kolom</b><small>Setiap kolom memiliki 26 jawaban.</small></div>
+          <div class="tip"><b>15 detik</b><small>Waktu otomatis berpindah ke kolom berikutnya.</small></div>
         </div>
       `;
     } else {
       $('instructionLead').textContent =
-        'Pilih jawaban yang paling tepat. Soal akan berpindah setelah ' +
-        'jawaban dipilih atau waktu habis.';
-
+        'Pilih jawaban yang paling tepat. Soal berpindah setelah jawaban dipilih atau waktu habis.';
       $('instructionBody').innerHTML = `
         <div class="instruction-grid">
-          <div class="tip">
-            <b>20 soal</b>
-            <small>Bank soal sementara masih menggunakan data dummy.</small>
-          </div>
-
-          <div class="tip">
-            <b>30 detik/soal</b>
-            <small>Timer otomatis berpindah bila waktu habis.</small>
-          </div>
-
-          <div class="tip">
-            <b>3 paket</b>
-            <small>Struktur Paket 1–3 sudah tersedia.</small>
-          </div>
-
-          <div class="tip">
-            <b>Simpan PDF</b>
-            <small>Hasil dapat disimpan sebagai file PDF.</small>
-          </div>
+          <div class="tip"><b>20 soal</b><small>Fase 4 menggunakan soal dummy sementara.</small></div>
+          <div class="tip"><b>30 detik/soal</b><small>Timer otomatis berpindah bila waktu habis.</small></div>
+          <div class="tip"><b>3 paket</b><small>Paket 1–3 tersedia untuk setiap jenis latihan.</small></div>
+          <div class="tip"><b>Hasil PDF</b><small>Hasil tetap dapat diunduh meskipun mode tamu.</small></div>
         </div>
       `;
     }
@@ -608,45 +794,39 @@
   }
 
   // ============================================================
-  // START TEST
+  // TEST ENGINE
   // ============================================================
 
   function startTest() {
-    state.startedAt = Date.now();
-    state.lastResult = null;
-    state.locked = false;
+    if (!state.test || !TESTS[state.test]) return;
+
+    stopTimer();
     state.finished = false;
+    state.lastResult = null;
+    state.currentTestId = `T-${Date.now()}-${randomInt(100000)}`;
+    state.testStartedAt = Date.now();
 
     if (TESTS[state.test].kind === 'kraepelin') {
       startKraepelin();
-      return;
+    } else {
+      startMCQ();
     }
 
-    startMCQ();
+    persistTest();
   }
-
-  // ============================================================
-  // KRAEPELIN
-  // ============================================================
 
   function startKraepelin() {
     state.columns = Array.from(
       { length: CONFIG.KRAEPELIN_COLUMNS },
-      () =>
-        Array.from(
-          { length: CONFIG.KRAEPELIN_DIGITS },
-          () => randomInt(10)
-        )
+      () => Array.from({ length: 27 }, () => randomInt(10)),
     );
-
     state.answers = Array.from(
       { length: CONFIG.KRAEPELIN_COLUMNS },
-      () =>
-        Array(CONFIG.KRAEPELIN_QUESTIONS).fill(null)
+      () => Array(CONFIG.KRAEPELIN_QUESTIONS).fill(null),
     );
-
-    state.columnIndex = 0;
-    state.questionIndex = 0;
+    state.colIndex = 0;
+    state.qIndex = 0;
+    state.questions = [];
 
     renderKraepelin();
     showView('test');
@@ -654,36 +834,15 @@
   }
 
   function renderKraepelin() {
-    const column = state.columns[state.columnIndex];
-    const question = state.questionIndex;
-
-    const bottom =
-      column[CONFIG.KRAEPELIN_DIGITS - 1 - question];
-
-    const top =
-      column[CONFIG.KRAEPELIN_DIGITS - 2 - question];
+    const column = state.columns[state.colIndex];
+    const answerIndex = state.qIndex;
+    const bottom = column[26 - answerIndex];
+    const top = column[25 - answerIndex];
 
     $('testTypeLabel').textContent = 'Kraepelin';
-
-    $('questionCounter').textContent =
-      `${question + 1}/${CONFIG.KRAEPELIN_QUESTIONS}`;
-
-    $('timeCounter').textContent =
-      `${CONFIG.KRAEPELIN_SECONDS}s`;
-
-    const progress =
-      (
-        state.columnIndex * CONFIG.KRAEPELIN_QUESTIONS +
-        question
-      ) /
-      (
-        CONFIG.KRAEPELIN_COLUMNS *
-        CONFIG.KRAEPELIN_QUESTIONS
-      ) *
-      100;
-
-    $('progressBar').style.width =
-      `${progress}%`;
+    $('questionCounter').textContent = `${answerIndex + 1}/26`;
+    $('timeCounter').textContent = `${CONFIG.KRAEPELIN_SECONDS}s`;
+    $('progressBar').style.width = `${((state.colIndex * 26 + answerIndex) / 1300) * 100}%`;
 
     $('testContent').innerHTML = `
       <div class="question-label">JUMLAHKAN</div>
@@ -693,131 +852,74 @@
     `;
 
     $('keypad').innerHTML = '';
+    [7, 8, 9, 4, 5, 6, 1, 2, 3, 0].forEach((digit) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = `digit-btn ${digit === 0 ? 'zero-btn' : ''}`;
+      button.textContent = digit;
+      button.addEventListener('click', () => answerKraepelin(digit));
+      $('keypad').appendChild(button);
+    });
 
-    [7, 8, 9, 4, 5, 6, 1, 2, 3, 0]
-      .forEach((digit) => {
-        const button = document.createElement('button');
-
-        button.className = 'digit-btn';
-
-        if (digit === 0) {
-          button.classList.add('zero-btn');
-        }
-
-        button.textContent = String(digit);
-        button.type = 'button';
-
-        button.addEventListener('click', () => {
-          answerKraepelin(digit);
-        });
-
-        $('keypad').appendChild(button);
-      });
-
-    $('testHint').textContent =
-      'Keyboard 0–9 juga bisa digunakan.';
+    $('testHint').textContent = 'Keyboard 0–9 juga bisa digunakan.';
   }
 
   function startColumnTimer() {
     stopTimer();
+    const end = Date.now() + CONFIG.KRAEPELIN_SECONDS * 1000;
 
-    const endTime =
-      Date.now() +
-      CONFIG.KRAEPELIN_SECONDS * 1000;
+    state.timerId = setInterval(() => {
+      const left = Math.max(0, Math.ceil((end - Date.now()) / 1000));
+      $('timeCounter').textContent = `${left}s`;
 
-    state.timerId = window.setInterval(() => {
-      const secondsLeft = Math.max(
-        0,
-        Math.ceil((endTime - Date.now()) / 1000)
-      );
-
-      $('timeCounter').textContent =
-        `${secondsLeft}s`;
-
-      if (secondsLeft <= 0) {
+      if (left <= 0) {
         stopTimer();
-        nextKraepelinColumn();
+        nextColumn();
       }
     }, 100);
   }
 
   function answerKraepelin(digit) {
-    if (state.locked) {
-      return;
-    }
+    if (state.answers[state.colIndex][state.qIndex] !== null) return;
 
-    const currentAnswer =
-      state.answers[state.columnIndex][state.questionIndex];
+    state.answers[state.colIndex][state.qIndex] = Number(digit);
 
-    if (currentAnswer !== null) {
-      return;
-    }
-
-    state.answers[state.columnIndex][state.questionIndex] =
-      Number(digit);
-
-    if (
-      state.questionIndex <
-      CONFIG.KRAEPELIN_QUESTIONS - 1
-    ) {
-      state.questionIndex += 1;
+    if (state.qIndex < CONFIG.KRAEPELIN_QUESTIONS - 1) {
+      state.qIndex += 1;
       renderKraepelin();
-      return;
+    } else {
+      nextColumn();
     }
 
-    nextKraepelinColumn();
+    persistTest();
   }
 
-  function nextKraepelinColumn() {
-    stopTimer();
-
-    if (
-      state.columnIndex >=
-      CONFIG.KRAEPELIN_COLUMNS - 1
-    ) {
+  function nextColumn() {
+    if (state.colIndex >= CONFIG.KRAEPELIN_COLUMNS - 1) {
       finishTest();
       return;
     }
 
-    state.columnIndex += 1;
-    state.questionIndex = 0;
-
+    state.colIndex += 1;
+    state.qIndex = 0;
     renderKraepelin();
     startColumnTimer();
+    persistTest();
   }
-
-  // ============================================================
-  // MCQ
-  // ============================================================
 
   function startMCQ() {
     const base = SAMPLE[state.test] || [];
+    const pool = [];
 
-    let questions = [];
-
-    // Dummy bank: repeat the sample items until 20 questions.
-    while (
-      questions.length <
-      CONFIG.MCQ_QUESTIONS
-    ) {
-      questions.push(
-        ...base.map(([text, options, correct]) => ({
-          text,
-          options: [...options],
-          correct
-        }))
-      );
+    for (let i = 0; i < 4; i += 1) {
+      base.forEach(([text, options, correct]) => {
+        pool.push({ text, options, correct });
+      });
     }
 
-    state.questions = shuffle(
-      questions.slice(0, CONFIG.MCQ_QUESTIONS)
-    );
-
-    state.answers =
-      Array(CONFIG.MCQ_QUESTIONS).fill(null);
-
+    state.questions = shuffle(pool).slice(0, CONFIG.MCQ_QUESTIONS);
+    state.answers = Array(CONFIG.MCQ_QUESTIONS).fill(null);
     state.index = 0;
-    state.locked = false;
 
     renderMCQ();
     showView('test');
@@ -825,68 +927,42 @@
   }
 
   function renderMCQ() {
-    const question =
-      state.questions[state.index];
+    const question = state.questions[state.index];
+    if (!question) return;
 
-    $('testTypeLabel').textContent =
-      TESTS[state.test].name;
-
-    $('questionCounter').textContent =
-      `${state.index + 1}/${CONFIG.MCQ_QUESTIONS}`;
-
-    $('progressBar').style.width =
-      `${(state.index / CONFIG.MCQ_QUESTIONS) * 100}%`;
+    $('testTypeLabel').textContent = TESTS[state.test].name;
+    $('questionCounter').textContent = `${state.index + 1}/${CONFIG.MCQ_QUESTIONS}`;
+    $('timeCounter').textContent = `${CONFIG.MCQ_SECONDS}s`;
+    $('progressBar').style.width = `${(state.index / CONFIG.MCQ_QUESTIONS) * 100}%`;
 
     $('testContent').innerHTML = `
-      <div class="question-label">
-        PERTANYAAN ${state.index + 1}
-      </div>
-
-      <h2>
-        ${escapeHtml(question.text)}
-      </h2>
+      <div class="question-label">PERTANYAAN ${state.index + 1}</div>
+      <h2>${escapeHtml(question.text)}</h2>
     `;
 
     $('keypad').innerHTML = '';
 
-    question.options.forEach((option, index) => {
-      const button =
-        document.createElement('button');
-
-      button.className = 'answer-btn';
+    question.options.forEach((option, optionIndex) => {
+      const button = document.createElement('button');
       button.type = 'button';
-
-      button.textContent =
-        `${String.fromCharCode(65 + index)}. ${option}`;
-
-      button.addEventListener('click', () => {
-        answerMCQ(index);
-      });
-
+      button.className = 'answer-btn';
+      button.textContent = `${String.fromCharCode(65 + optionIndex)}. ${option}`;
+      button.addEventListener('click', () => answerMCQ(optionIndex));
       $('keypad').appendChild(button);
     });
 
-    $('testHint').textContent =
-      'Pilih satu jawaban. Waktu per soal: 30 detik.';
+    $('testHint').textContent = `Pilih satu jawaban. Waktu per soal: ${CONFIG.MCQ_SECONDS} detik.`;
   }
 
   function startQuestionTimer() {
     stopTimer();
+    const end = Date.now() + CONFIG.MCQ_SECONDS * 1000;
 
-    const endTime =
-      Date.now() +
-      CONFIG.MCQ_SECONDS * 1000;
+    state.timerId = setInterval(() => {
+      const left = Math.max(0, Math.ceil((end - Date.now()) / 1000));
+      $('timeCounter').textContent = `${left}s`;
 
-    state.timerId = window.setInterval(() => {
-      const secondsLeft = Math.max(
-        0,
-        Math.ceil((endTime - Date.now()) / 1000)
-      );
-
-      $('timeCounter').textContent =
-        `${secondsLeft}s`;
-
-      if (secondsLeft <= 0) {
+      if (left <= 0) {
         stopTimer();
         answerMCQ(null);
       }
@@ -894,78 +970,68 @@
   }
 
   function answerMCQ(choice) {
-    if (state.locked) {
-      return;
-    }
+    if (state.answers[state.index] !== null || state.finished) return;
 
-    if (state.answers[state.index] !== null) {
-      return;
-    }
+    const question = state.questions[state.index];
+    const isLastQuestion = state.index >= state.questions.length - 1;
 
-    state.locked = true;
+    state.answers[state.index] = choice;
     stopTimer();
 
-    const question =
-      state.questions[state.index];
+    const buttons = $('keypad').querySelectorAll('button');
 
-    state.answers[state.index] =
-      choice === null ? null : Number(choice);
+    buttons.forEach((button, buttonIndex) => {
+      button.disabled = true;
 
-    if (choice !== null) {
-      const buttons =
-        $('keypad').querySelectorAll('button');
-
-      buttons.forEach((button, buttonIndex) => {
-        if (buttonIndex === question.correct) {
-          button.classList.add('correct');
-        }
-
-        if (
-          buttonIndex === choice &&
-          choice !== question.correct
-        ) {
-          button.classList.add('wrong');
-        }
-      });
-    }
-
-    const isLastQuestion =
-      state.index >=
-      state.questions.length - 1;
-
-    window.setTimeout(() => {
-      if (isLastQuestion) {
-        state.locked = false;
-        finishTest();
-        return;
+      if (choice !== null && buttonIndex === question.correct) {
+        button.classList.add('correct');
       }
 
-      state.index += 1;
-      state.locked = false;
+      if (choice !== null && buttonIndex === choice && choice !== question.correct) {
+        button.classList.add('wrong');
+      }
+    });
 
+    persistTest();
+
+    if (isLastQuestion) {
+      setTimeout(() => finishTest(), choice === null ? 0 : 160);
+      return;
+    }
+
+    setTimeout(() => {
+      state.index += 1;
       renderMCQ();
       startQuestionTimer();
-    }, choice === null ? 0 : 180);
+      persistTest();
+    }, choice === null ? 0 : 160);
+  }
+
+  function stopTimer() {
+    if (state.timerId) {
+      clearInterval(state.timerId);
+      state.timerId = null;
+    }
   }
 
   // ============================================================
-  // SCORING
+  // SCORE
   // ============================================================
 
-  function clamp(number) {
-    return Math.max(
-      0,
-      Math.min(100, number)
-    );
+  function clamp(value) {
+    return Math.max(0, Math.min(100, value));
   }
 
   function mean(values) {
-    return values.length
-      ? values.reduce(
-          (sum, value) => sum + value,
-          0
-        ) / values.length
-      : 0;
+    return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
+  }
+
+  function level(score) {
+    if (score >= 90) return 'Sangat baik';
+    if (score >= 80) return 'Baik';
+    if (score >= 65) return 'Cukup';
+    if (score >= 50) return 'Perlu latihan';
+    return 'Perlu ditingkatkan';
   }
 
   function calculateKraepelin() {
@@ -973,91 +1039,43 @@
     let correct = 0;
     const counts = [];
 
-    state.answers.forEach(
-      (columnAnswers, columnIndex) => {
-        let answeredInColumn = 0;
+    state.answers.forEach((columnAnswers, columnIndex) => {
+      let columnCount = 0;
 
-        columnAnswers.forEach(
-          (answer, questionIndex) => {
-            if (answer === null) {
-              return;
-            }
+      columnAnswers.forEach((answer, questionIndex) => {
+        if (answer === null) return;
 
-            answered += 1;
-            answeredInColumn += 1;
+        answered += 1;
+        columnCount += 1;
 
-            const expected =
-              (
-                state.columns[columnIndex][26 - questionIndex] +
-                state.columns[columnIndex][25 - questionIndex]
-              ) %
-              10;
+        const expected = (
+          state.columns[columnIndex][26 - questionIndex] +
+          state.columns[columnIndex][25 - questionIndex]
+        ) % 10;
 
-            if (answer === expected) {
-              correct += 1;
-            }
-          }
-        );
+        if (Number(answer) === expected) correct += 1;
+      });
 
-        counts.push(answeredInColumn);
-      }
+      counts.push(columnCount);
+    });
+
+    const total = CONFIG.KRAEPELIN_COLUMNS * CONFIG.KRAEPELIN_QUESTIONS;
+    const average = mean(counts);
+    const standardDeviation = Math.sqrt(
+      mean(counts.map((count) => (count - average) ** 2)),
     );
 
-    const total =
-      CONFIG.KRAEPELIN_COLUMNS *
-      CONFIG.KRAEPELIN_QUESTIONS;
+    const consistency = Math.round(
+      clamp(100 - (average ? standardDeviation / average : 1) * 100),
+    );
 
-    const average = mean(counts);
-
-    const standardDeviation =
-      Math.sqrt(
-        mean(
-          counts.map(
-            (value) =>
-              (value - average) ** 2
-          )
-        )
-      );
-
-    const consistency =
-      Math.round(
-        clamp(
-          100 -
-          (
-            average
-              ? standardDeviation / average
-              : 1
-          ) *
-          100
-        )
-      );
-
-    const firstTen =
-      mean(counts.slice(0, 10));
-
-    const middleTen =
-      mean(counts.slice(20, 30));
-
-    const lastTen =
-      mean(counts.slice(40, 50));
-
-    const baseline =
-      Math.max(
-        1,
-        mean([firstTen, middleTen])
-      );
-
-    const endurance =
-      Math.round(
-        clamp(
-          100 -
-          Math.max(
-            0,
-            (baseline - lastTen) / baseline
-          ) *
-          100
-        )
-      );
+    const first = mean(counts.slice(0, 10));
+    const middle = mean(counts.slice(20, 30));
+    const last = mean(counts.slice(40, 50));
+    const baseline = Math.max(1, mean([first, middle]));
+    const endurance = Math.round(
+      clamp(100 - Math.max(0, (baseline - last) / baseline) * 100),
+    );
 
     return {
       type: 'kraepelin',
@@ -1066,82 +1084,28 @@
       correct,
       wrong: answered - correct,
       total,
-      score:
-        Math.round(
-          (correct / total) * 100
-        ),
-      speed:
-        Math.round(
-          (answered / total) * 100
-        ),
-      accuracy:
-        answered
-          ? Math.round(
-              (correct / answered) * 100
-            )
-          : 0,
+      score: Math.round((correct / total) * 100),
+      speed: Math.round((answered / total) * 100),
+      accuracy: answered ? Math.round((correct / answered) * 100) : 0,
       consistency,
       endurance,
-      chart: counts
+      average,
+      chart: counts,
     };
   }
 
   function calculateMCQ() {
-    const total =
-      state.questions.length;
-
-    const answered =
-      state.answers.filter(
-        (answer) => answer !== null
-      ).length;
-
-    const correct =
-      state.answers.reduce(
-        (sum, answer, index) => {
-          if (
-            answer !== null &&
-            answer ===
-              state.questions[index].correct
-          ) {
-            return sum + 1;
-          }
-
-          return sum;
-        },
-        0
-      );
-
-    const wrong =
-      answered - correct;
-
-    const accuracy =
-      answered
-        ? Math.round(
-            (correct / answered) * 100
-          )
-        : 0;
-
-    const speed =
-      Math.round(
-        (answered / total) * 100
-      );
-
-    const consistency =
-      Math.round(
-        clamp(
-          100 -
-          Math.abs(
-            speed - accuracy
-          )
-        )
-      );
-
-    const endurance =
-      Math.round(
-        clamp(
-          (answered / total) * 100
-        )
-      );
+    const total = state.questions.length;
+    const answered = state.answers.filter((answer) => answer !== null).length;
+    const correct = state.answers.reduce(
+      (sum, answer, index) => sum + (answer === state.questions[index].correct ? 1 : 0),
+      0,
+    );
+    const wrong = answered - correct;
+    const accuracy = answered ? Math.round((correct / answered) * 100) : 0;
+    const speed = Math.round((answered / total) * 100);
+    const consistency = Math.round(clamp(100 - Math.abs(speed - accuracy)));
+    const endurance = Math.round(clamp((answered / total) * 100));
 
     return {
       type: state.test,
@@ -1155,100 +1119,107 @@
       accuracy,
       consistency,
       endurance,
-      chart:
-        state.answers.map(
-          (answer, index) =>
-            answer === null
-              ? 0
-              : answer ===
-                state.questions[index].correct
-                ? 1
-                : 0
-        )
+      average: mean(state.answers.map((answer) => (answer === null ? 0 : 1))),
+      chart: state.answers.map((answer, index) =>
+        answer === null ? 0 : answer === state.questions[index].correct ? 1 : 0,
+      ),
     };
   }
 
-  function level(score) {
-    if (score >= 90) {
-      return 'Sangat baik';
-    }
-
-    if (score >= 80) {
-      return 'Baik';
-    }
-
-    if (score >= 65) {
-      return 'Cukup';
-    }
-
-    if (score >= 50) {
-      return 'Perlu latihan';
-    }
-
-    return 'Perlu ditingkatkan';
-  }
-
   // ============================================================
-  // FINISH TEST
+  // PERSIST ACTIVE TEST
   // ============================================================
 
-  function finishTest() {
-    if (state.finished) {
-      return;
-    }
-
-    state.finished = true;
-    state.locked = true;
-
-    stopTimer();
-
-    const result =
-      TESTS[state.test].kind === 'kraepelin'
-        ? calculateKraepelin()
-        : calculateMCQ();
-
-    result.test_id =
-      `T-${Date.now()}-${randomInt(100000)}`;
-
-    result.tanggal =
-      new Date().toISOString();
-
-    state.lastResult = result;
-
-    // Show the result immediately.
-    // Saving to Sheets happens in the background so a slow
-    // backend can never freeze the result page.
-    renderResult(result);
-    showView('result');
-
-    window.setTimeout(() => {
-      drawChart(result);
-      saveHistoryToGoogleSheets(result);
-    }, 20);
-  }
-
-  async function saveHistoryToGoogleSheets(result) {
-    if (state.isGuest) {
-      return;
-    }
-
-    if (!state.session?.token) {
-      toast(
-        'Sesi akun tidak ditemukan. Hasil tetap tampil, tetapi histori tidak tersimpan.',
-        'warning',
-        4200
-      );
-      return;
-    }
+  function persistTest() {
+    if (state.finished || state.isGuest || !state.session) return;
 
     try {
-      await api('saveHistory', {
+      localStorage.setItem(
+        CONFIG.TEST_KEY,
+        JSON.stringify({
+          version: 2,
+          userId: state.session.user_id,
+          test: state.test,
+          package: state.package,
+          currentTestId: state.currentTestId,
+          questions: state.questions,
+          answers: state.answers,
+          index: state.index,
+          columns: state.columns,
+          colIndex: state.colIndex,
+          qIndex: state.qIndex,
+          testStartedAt: state.testStartedAt,
+        }),
+      );
+    } catch (error) {
+      console.warn('Progress tes tidak tersimpan:', error);
+    }
+  }
+
+  function clearPersistedTest() {
+    localStorage.removeItem(CONFIG.TEST_KEY);
+  }
+
+  function loadPersistedTest() {
+    if (!state.session) return null;
+
+    try {
+      const saved = JSON.parse(localStorage.getItem(CONFIG.TEST_KEY) || 'null');
+      if (!saved || saved.userId !== state.session.user_id || !saved.test) return null;
+      return saved;
+    } catch {
+      return null;
+    }
+  }
+
+  function resumePersistedTest() {
+    const saved = loadPersistedTest();
+    if (!saved) {
+      toast('Tidak ada progress tes yang bisa dilanjutkan.', 'warning');
+      return;
+    }
+
+    state.test = saved.test;
+    state.package = Number(saved.package) || 1;
+    state.currentTestId = saved.currentTestId || `T-${Date.now()}-${randomInt(100000)}`;
+    state.questions = Array.isArray(saved.questions) ? saved.questions : [];
+    state.answers = Array.isArray(saved.answers) ? saved.answers : [];
+    state.index = Number(saved.index) || 0;
+    state.columns = Array.isArray(saved.columns) ? saved.columns : [];
+    state.colIndex = Number(saved.colIndex) || 0;
+    state.qIndex = Number(saved.qIndex) || 0;
+    state.testStartedAt = Number(saved.testStartedAt) || Date.now();
+    state.finished = false;
+
+    if (TESTS[state.test]?.kind === 'kraepelin') {
+      renderKraepelin();
+      showView('test');
+      startColumnTimer();
+    } else {
+      renderMCQ();
+      showView('test');
+      startQuestionTimer();
+    }
+
+    toast('Progress tes dipulihkan.', 'success');
+  }
+
+  // ============================================================
+  // FINISH + SAVE HISTORY
+  // ============================================================
+
+  async function saveHistory(result) {
+    if (state.isGuest || !state.session?.token || state.savingHistory) return false;
+
+    state.savingHistory = true;
+
+    try {
+      await apiChecked('saveHistory', {
         token: state.session.token,
-        test_id: result.test_id,
-        user_id: state.session.user_id,
+        test_id: state.currentTestId,
         test_type: result.type,
         package: result.package,
-        tanggal: result.tanggal,
+        tanggal: new Date().toISOString(),
         score: result.score,
         correct: result.correct,
         wrong: result.wrong,
@@ -1256,486 +1227,163 @@
         speed: result.speed,
         accuracy: result.accuracy,
         consistency: result.consistency,
-        endurance: result.endurance
+        endurance: result.endurance,
       });
 
-      toast(
-        'Hasil berhasil disimpan ke Google Sheets.',
-        'success'
-      );
+      return true;
     } catch (error) {
-      console.error(error);
+      toast(`Hasil tampil, tetapi belum masuk spreadsheet: ${error.message}`, 'warning', 5000);
+      return false;
+    } finally {
+      state.savingHistory = false;
+    }
+  }
 
-      toast(
-        `Hasil selesai, tetapi histori gagal disimpan: ${error.message}`,
-        'warning',
-        5000
-      );
+  async function finishTest() {
+    if (state.finished) return;
+
+    state.finished = true;
+    stopTimer();
+
+    const result = TESTS[state.test].kind === 'kraepelin'
+      ? calculateKraepelin()
+      : calculateMCQ();
+
+    result.testId = state.currentTestId || `T-${Date.now()}-${randomInt(100000)}`;
+    result.tanggal = new Date().toISOString();
+    state.lastResult = result;
+    clearPersistedTest();
+
+    renderResult(result);
+    drawChart(result);
+    showView('result');
+
+    await saveHistory(result);
+
+    if (!state.isGuest) {
+      try {
+        await refreshHistory();
+        toast('Hasil tersimpan ke Google Sheets.', 'success');
+      } catch (error) {
+        console.warn('Refresh histori gagal:', error);
+      }
     }
   }
 
   // ============================================================
-  // RESULT
+  // RESULT + CHART
   // ============================================================
 
   function renderResult(result) {
-    const test =
-      TESTS[result.type];
+    const name = state.isGuest ? 'Tamu' : state.session?.username || 'Peserta';
+    $('resultTitle').textContent = `${TESTS[result.type].name} selesai 🎉`;
+    $('resultUsername').textContent = name;
 
-    $('resultTitle').textContent =
-      `${test.name} selesai 🎉`;
-
-    if (state.isGuest) {
-      $('resultIntro').innerHTML =
-        'Hasil mode <strong>Tamu</strong> tidak disimpan ke histori akun. ' +
-        'Gunakan tombol <strong>Simpan dalam PDF</strong> untuk menyimpan salinannya.';
-    } else {
-      $('resultIntro').innerHTML =
-        'Hasil <strong>disimpan ke Google Sheets</strong> secara otomatis setelah tes selesai.';
-    }
+    $('resultIntro').innerHTML = state.isGuest
+      ? 'Hasil mode <strong>Tamu</strong> tidak disimpan ke histori. <strong>Download PDF</strong> untuk menyimpan salinannya.'
+      : `Hasil <strong>${escapeHtml(name)}</strong> sudah dikirim ke Google Sheets. Download PDF untuk menyimpan salinan detailnya.`;
 
     const scores = [
-      ['Kecepatan', result.speed],
-      ['Ketelitian', result.accuracy],
-      ['Konsistensi', result.consistency],
-      ['Ketahanan', result.endurance]
+      ['speed', 'Kecepatan', result.speed],
+      ['accuracy', 'Ketelitian', result.accuracy],
+      ['consistency', 'Konsistensi', result.consistency],
+      ['endurance', 'Ketahanan', result.endurance],
     ];
 
-    $('resultScores').innerHTML =
-      scores
-        .map(
-          ([name, value]) => `
-            <article class="score-card">
-              <span class="score-label">${name}</span>
-              <strong>${value}%</strong>
-              <small>${level(value)}</small>
+    $('resultScores').innerHTML = scores.map(([key, label, score]) => `
+      <article class="score-card">
+        <span class="score-label">${label}</span>
+        <strong>${score}%</strong>
+        <small>${level(score)}</small>
+        <div class="score-track"><i style="--score:${score}%"></i></div>
+      </article>
+    `).join('');
 
-              <div class="score-track">
-                <i style="--score:${value}%"></i>
-              </div>
-            </article>
-          `
-        )
-        .join('');
+    $('resultSummary').innerHTML = [
+      ['Skor utama', `${result.score}%`],
+      ['Total dijawab', `${result.answered}/${result.total}`],
+      ['Benar', result.correct],
+      ['Salah', result.wrong],
+    ].map(([label, value]) => `
+      <div><span>${label}</span><strong>${value}</strong></div>
+    `).join('');
 
-    $('resultSummary').innerHTML =
-      [
-        ['Skor utama', `${result.score}%`],
-        [
-          'Total dijawab',
-          `${result.answered}/${result.total}`
-        ],
-        ['Benar', result.correct],
-        ['Salah', result.wrong]
-      ]
-        .map(
-          ([label, value]) => `
-            <div>
-              <span>${label}</span>
-              <strong>${value}</strong>
-            </div>
-          `
-        )
-        .join('');
-
-    $('chartSubtitle').textContent =
-      result.type === 'kraepelin'
-        ? 'Jumlah jawaban per kolom.'
-        : 'Benar (1) dan salah/kosong (0) per soal.';
-
-    $('chartBadge').textContent =
-      result.type === 'kraepelin'
-        ? '50 kolom'
-        : `${result.total} soal`;
+    $('chartSubtitle').textContent = result.type === 'kraepelin'
+      ? 'Jumlah jawaban yang berhasil dikerjakan pada tiap kolom.'
+      : 'Benar (1) dan tidak benar/kosong (0) per soal.';
+    $('chartBadge').textContent = result.type === 'kraepelin'
+      ? '50 kolom'
+      : `${result.total} soal`;
   }
 
   function drawChart(result) {
-    const canvas =
-      $('performanceChart');
+    const canvas = $('performanceChart');
+    if (!canvas) return;
 
-    if (!canvas) {
-      return;
-    }
-
-    const dpr =
-      window.devicePixelRatio || 1;
-
-    const width =
-      Math.max(
-        500,
-        canvas.clientWidth || 700
-      );
-
+    const dpr = window.devicePixelRatio || 1;
+    const width = Math.max(500, canvas.clientWidth || 700);
     const height = 220;
 
-    canvas.width =
-      width * dpr;
+    canvas.width = width * dpr;
+    canvas.height = height * dpr;
 
-    canvas.height =
-      height * dpr;
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, width, height);
 
-    const context =
-      canvas.getContext('2d');
+    ctx.strokeStyle = '#dbe5ef';
+    ctx.fillStyle = '#6f7f94';
+    ctx.font = '10px Inter, sans-serif';
 
-    context.setTransform(
-      dpr,
-      0,
-      0,
-      dpr,
-      0,
-      0
-    );
+    ctx.beginPath();
+    ctx.moveTo(35, 10);
+    ctx.lineTo(35, height - 28);
+    ctx.lineTo(width - 10, height - 28);
+    ctx.stroke();
 
-    context.clearRect(
-      0,
-      0,
-      width,
-      height
-    );
-
-    context.strokeStyle =
-      '#dbe5ef';
-
-    context.fillStyle =
-      '#6f7f94';
-
-    context.font =
-      '10px Inter, sans-serif';
-
-    context.beginPath();
-    context.moveTo(35, 10);
-    context.lineTo(35, height - 28);
-    context.lineTo(width - 10, height - 28);
-    context.stroke();
-
-    const data =
-      result.chart.slice(
-        0,
-        result.type === 'kraepelin'
-          ? 50
-          : 20
-      );
-
-    const max =
-      Math.max(1, ...data);
-
+    const data = result.chart.slice(0, result.type === 'kraepelin' ? 50 : 20);
+    const max = Math.max(1, ...data);
     const gap = 4;
+    const barWidth = Math.max(3, (width - 55) / data.length - gap);
 
-    const barWidth =
-      Math.max(
-        3,
-        (width - 55) / data.length - gap
-      );
+    data.forEach((value, index) => {
+      const barHeight = (value / max) * (height - 55);
+      const x = 38 + index * (barWidth + gap);
+      const y = height - 28 - barHeight;
+      ctx.fillStyle = '#2f7df2';
+      ctx.fillRect(x, y, barWidth, barHeight);
+    });
 
-    data.forEach(
-      (value, index) => {
-        const barHeight =
-          (value / max) *
-          (height - 55);
-
-        const x =
-          38 +
-          index *
-            (barWidth + gap);
-
-        const y =
-          height -
-          28 -
-          barHeight;
-
-        context.fillStyle =
-          '#2f7df2';
-
-        context.fillRect(
-          x,
-          y,
-          barWidth,
-          barHeight
-        );
-      }
-    );
-
-    context.fillStyle =
-      '#6f7f94';
-
-    context.fillText(
-      '0',
-      18,
-      height - 25
-    );
-
-    context.fillText(
-      String(max),
-      12,
-      18
-    );
+    ctx.fillStyle = '#6f7f94';
+    ctx.fillText('0', 18, height - 25);
+    ctx.fillText(String(max), 12, 18);
   }
 
   // ============================================================
   // PDF
-  //
-  // 1) Pakai jsPDF jika tersedia.
-  // 2) Jika CDN/library gagal, gunakan PDF generator kecil
-  //    bawaan browser. Jadi tombol tidak lagi bergantung
-  //    pada library eksternal.
   // ============================================================
 
   function downloadPdf() {
-    const result =
-      state.lastResult;
+    const result = state.lastResult;
 
     if (!result) {
-      toast(
-        'Hasil tes belum tersedia.',
-        'warning'
-      );
+      toast('Hasil tes belum tersedia.', 'warning');
       return;
     }
 
-    const jsPDF =
-      window.jspdf?.jsPDF;
+    const button = $('downloadPdfBtn');
+    busy(button, 'Menyiapkan PDF…', true);
 
-    if (typeof jsPDF === 'function') {
-      downloadPdfWithJsPdf(result, jsPDF);
-      return;
-    }
-
-    downloadSimplePdf(result);
-  }
-
-  function downloadPdfWithJsPdf(result, JsPDF) {
     try {
-      const doc =
-        new JsPDF();
-
-      const name =
-        state.isGuest
-          ? 'Tamu'
-          : (
-              state.session?.username ||
-              'Peserta'
-            );
-
-      doc.setFont(
-        'helvetica',
-        'bold'
-      );
-
-      doc.setFontSize(20);
-
-      doc.text(
-        'Hasil Latihan Psikotes',
-        20,
-        22
-      );
-
-      doc.setFont(
-        'helvetica',
-        'normal'
-      );
-
-      doc.setFontSize(10);
-
-      doc.text(
-        `Peserta: ${name}`,
-        20,
-        31
-      );
-
-      doc.text(
-        `Tes: ${TESTS[result.type].name} - Paket ${result.package}`,
-        20,
-        37
-      );
-
-      doc.text(
-        `Tanggal: ${new Date(result.tanggal).toLocaleString('id-ID')}`,
-        20,
-        43
-      );
-
-      doc.setFont(
-        'helvetica',
-        'bold'
-      );
-
-      doc.setFontSize(13);
-
-      doc.text(
-        'Ringkasan Performa',
-        20,
-        56
-      );
-
-      const rows = [
-        ['Skor utama', `${result.score}%`],
-        ['Kecepatan', `${result.speed}%`],
-        ['Ketelitian', `${result.accuracy}%`],
-        ['Konsistensi', `${result.consistency}%`],
-        ['Ketahanan', `${result.endurance}%`],
-        ['Dijawab', `${result.answered}/${result.total}`],
-        ['Benar', String(result.correct)],
-        ['Salah', String(result.wrong)]
-      ];
-
-      doc.setFont(
-        'helvetica',
-        'normal'
-      );
-
-      doc.setFontSize(10);
-
-      rows.forEach(
-        ([label, value], index) => {
-          doc.text(
-            `${label}: ${value}`,
-            20,
-            68 + index * 7
-          );
-        }
-      );
-
-      const canvas =
-        $('performanceChart');
-
-      if (canvas) {
-        const image =
-          canvas.toDataURL(
-            'image/png'
-          );
-
-        doc.addImage(
-          image,
-          'PNG',
-          20,
-          132,
-          170,
-          58
-        );
-      }
-
-      doc.setFontSize(8.5);
-      doc.setTextColor(
-        100,
-        112,
-        128
-      );
-
-      const note =
-        'Catatan: skor ini adalah indikator latihan internal, ' +
-        'bukan norma resmi psikotes dan bukan diagnosis psikologis.';
-
-      doc.text(
-        doc.splitTextToSize(
-          note,
-          170
-        ),
-        20,
-        202
-      );
-
-      doc.setTextColor(
-        24,
-        38,
-        59
-      );
-
-      doc.setFontSize(10);
-
-      doc.text(
-        'Interpretasi latihan',
-        20,
-        222
-      );
-
-      doc.setFontSize(9);
-
-      doc.text(
-        `Kecepatan: ${level(result.speed)} | Ketelitian: ${level(result.accuracy)}`,
-        20,
-        230
-      );
-
-      doc.text(
-        `Konsistensi: ${level(result.consistency)} | Ketahanan: ${level(result.endurance)}`,
-        20,
-        237
-      );
-
-      doc.save(
-        `hasil-${result.type}-paket-${result.package}-${new Date()
-          .toISOString()
-          .slice(0, 10)}.pdf`
-      );
-
-      toast(
-        'PDF berhasil disimpan.',
-        'success'
-      );
-    } catch (error) {
-      console.error(error);
-
-      toast(
-        'Library PDF gagal digunakan. Membuat PDF mandiri...',
-        'warning'
-      );
-
-      downloadSimplePdf(result);
-    }
-  }
-
-  // Minimal PDF writer.
-  // Tidak membutuhkan library eksternal.
-  function downloadSimplePdf(result) {
-    try {
-      const name =
-        state.isGuest
-          ? 'Tamu'
-          : (
-              state.session?.username ||
-              'Peserta'
-            );
-
-      const lines = [
-        'HASIL LATIHAN PSIKOTES',
-        '',
-        `Peserta     : ${name}`,
-        `Tes         : ${TESTS[result.type].name}`,
-        `Paket       : ${result.package}`,
-        `Tanggal     : ${new Date(result.tanggal).toLocaleString('id-ID')}`,
-        '',
-        'RINGKASAN PERFORMA',
-        `Skor utama  : ${result.score}%`,
-        `Kecepatan   : ${result.speed}% - ${level(result.speed)}`,
-        `Ketelitian  : ${result.accuracy}% - ${level(result.accuracy)}`,
-        `Konsistensi : ${result.consistency}% - ${level(result.consistency)}`,
-        `Ketahanan   : ${result.endurance}% - ${level(result.endurance)}`,
-        `Dijawab     : ${result.answered}/${result.total}`,
-        `Benar       : ${result.correct}`,
-        `Salah       : ${result.wrong}`,
-        '',
-        'Catatan:',
-        'Skor ini adalah indikator latihan internal.',
-        'Bukan norma resmi psikotes dan bukan diagnosis psikologis.'
-      ];
-
-      const pdf =
-        buildSimplePdf(lines);
-
-      const blob =
-        new Blob(
-          [pdf],
-          { type: 'application/pdf' }
-        );
-
-      const url =
-        URL.createObjectURL(blob);
-
-      const link =
-        document.createElement('a');
+      const participant = state.isGuest
+        ? 'Tamu'
+        : state.session?.username || 'Peserta';
+      const bytes = buildPdf(result, participant);
+      const blob = new Blob([bytes], { type: 'application/pdf' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
 
       link.href = url;
-
       link.download =
         `hasil-${result.type}-paket-${result.package}-${new Date()
           .toISOString()
@@ -1744,824 +1392,141 @@
       document.body.appendChild(link);
       link.click();
       link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
 
-      window.setTimeout(() => {
-        URL.revokeObjectURL(url);
-      }, 1000);
-
-      toast(
-        'PDF berhasil dibuat tanpa library eksternal.',
-        'success'
-      );
+      toast('PDF berhasil disimpan.', 'success');
     } catch (error) {
-      console.error(error);
-
-      toast(
-        'PDF mandiri gagal dibuat. Coba gunakan Print → Save as PDF.',
-        'warning',
-        4500
-      );
-
-      window.print();
+      console.error('PDF error:', error);
+      toast('PDF gagal dibuat.', 'warning', 4500);
+    } finally {
+      busy(button, '', false);
     }
   }
 
-  function buildSimplePdf(lines) {
-    const safeLines =
-      lines.map((line) =>
-        toPdfAscii(
-          String(line)
-        )
-      );
 
-    const pageWidth = 595;
-    const pageHeight = 842;
+  // ============================================================
+  // MODAL / NAVIGATION
+  // ============================================================
 
-    const objects = [];
+  function openEndTestModal() {
+    if (!views.test?.classList.contains('active')) return;
+    $('confirmModal').hidden = false;
+  }
 
-    const contentLines = [
-      'BT',
-      '/F1 18 Tf',
-      `50 ${pageHeight - 60} Td`
-    ];
+  function abandonTest() {
+    stopTimer();
+    state.finished = true;
+    state.lastResult = null;
+    clearPersistedTest();
+    $('confirmModal').hidden = true;
+    showView('dashboard');
+    toast('Tes dibatalkan. Progress tidak disimpan.', 'info');
+  }
 
-    let lineIndex = 0;
+  // ============================================================
+  // EVENT BINDING
+  // ============================================================
 
-    safeLines.forEach((line) => {
-      if (lineIndex === 0) {
-        contentLines.push(
-          `(${pdfEscape(line)}) Tj`
-        );
-      } else {
-        contentLines.push(
-          '0 -20 Td'
-        );
-        contentLines.push(
-          `(${pdfEscape(line)}) Tj`
-        );
-      }
+  function bind() {
+    $('landingLoginBtn').addEventListener('click', () => showAuth('login'));
+    $('landingRegisterBtn').addEventListener('click', () => showAuth('register'));
+    $('landingGuestBtn').addEventListener('click', () => { $('guestModal').hidden = false; });
 
-      lineIndex += 1;
+    $('cancelGuestBtn').addEventListener('click', () => { $('guestModal').hidden = true; });
+    $('confirmGuestBtn').addEventListener('click', () => {
+      $('guestModal').hidden = true;
+      enterGuest();
+      toast('Mode tamu aktif.', 'info');
     });
 
-    contentLines.push('ET');
+    $('backToLandingBtn').addEventListener('click', () => showView('landing'));
+    $('openRegisterFromLogin').addEventListener('click', () => showAuth('register'));
+    $('openLoginFromRegister').addEventListener('click', () => showAuth('login'));
 
-    const content =
-      contentLines.join('\n');
+    $('backFromInstructionBtn').addEventListener('click', () => showView('dashboard'));
+    $('startTestBtn').addEventListener('click', startTest);
 
-    objects.push(
-      '<< /Type /Catalog /Pages 2 0 R >>'
-    );
+    $('testHomeBtn').addEventListener('click', openEndTestModal);
+    $('cancelEndTestBtn').addEventListener('click', () => { $('confirmModal').hidden = true; });
+    $('confirmEndTestBtn').addEventListener('click', abandonTest);
 
-    objects.push(
-      '<< /Type /Pages /Kids [3 0 R] /Count 1 >>'
-    );
-
-    objects.push(
-      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>`
-    );
-
-    objects.push(
-      `<< /Length ${content.length} >>\nstream\n${content}\nendstream`
-    );
-
-    objects.push(
-      '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>'
-    );
-
-    let pdf =
-      '%PDF-1.4\n';
-
-    const offsets =
-      [0];
-
-    objects.forEach(
-      (object, index) => {
-        offsets[index + 1] =
-          pdf.length;
-
-        pdf +=
-          `${index + 1} 0 obj\n`;
-
-        pdf +=
-          `${object}\n`;
-
-        pdf +=
-          'endobj\n';
+    $('downloadPdfBtn').addEventListener('click', downloadPdf);
+    $('resultHistoryBtn').addEventListener('click', async () => {
+      if (!state.isGuest) {
+        try { await refreshHistory(); } catch (error) { toast(error.message, 'warning'); }
       }
-    );
+      renderHistory();
+      showView('history');
+    });
 
-    const xrefOffset =
-      pdf.length;
-
-    pdf +=
-      `xref\n0 ${objects.length + 1}\n`;
-
-    pdf +=
-      '0000000000 65535 f \n';
-
-    for (
-      let i = 1;
-      i <= objects.length;
-      i += 1
-    ) {
-      pdf +=
-        `${String(offsets[i]).padStart(10, '0')} 00000 n \n`;
-    }
-
-    pdf +=
-      'trailer\n';
-
-    pdf +=
-      `<< /Size ${objects.length + 1} /Root 1 0 R >>\n`;
-
-    pdf +=
-      'startxref\n';
-
-    pdf +=
-      `${xrefOffset}\n`;
-
-    pdf +=
-      '%%EOF';
-
-    return pdf;
-  }
-
-  function pdfEscape(value) {
-    return String(value)
-      .replace(/\\/g, '\\\\')
-      .replace(/\(/g, '\\(')
-      .replace(/\)/g, '\\)');
-  }
-
-  function toPdfAscii(value) {
-    return value
-      .normalize('NFKD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .replace(/[^\x20-\x7E]/g, '?');
-  }
-
-  // ============================================================
-  // HISTORY
-  // ============================================================
-
-  async function renderHistory() {
-    const body =
-      $('historyTableBody');
-
-    const empty =
-      $('emptyHistory');
-
-    const table =
-      $('historyTable');
-
-    if (!state.session?.token) {
-      body.innerHTML = '';
-      empty.hidden = false;
-      table.hidden = true;
-
-      $('historyPageCount').textContent =
-        '0';
-
-      return;
-    }
-
-    body.innerHTML = '';
-
-    empty.hidden = true;
-    table.hidden = true;
-
-    $('historyPageCount').textContent =
-      '…';
-
-    try {
-      const response =
-        await api(
-          'getHistory',
-          {
-            token: state.session.token
-          }
-        );
-
-      if (!response?.success) {
-        throw new Error(
-          response?.message ||
-          'Histori tidak dapat dimuat.'
-        );
+    $('finishBtn').addEventListener('click', async () => {
+      if (state.isGuest) {
+        leaveGuest();
+        showView('landing');
+        return;
       }
+      await goDashboard();
+    });
 
-      const history =
-        Array.isArray(response.history)
-          ? response.history
-          : [];
-
-      $('historyPageCount').textContent =
-        String(history.length);
-
-      empty.hidden =
-        history.length > 0;
-
-      table.hidden =
-        history.length === 0;
-
-      history.forEach(
-        (item, index) => {
-          const row =
-            document.createElement('tr');
-
-          row.innerHTML = `
-            <td>${index + 1}</td>
-            <td>${formatDate(item.tanggal)}</td>
-            <td>${escapeHtml(
-              TESTS[item.test_type]?.name ||
-              item.test_type ||
-              '-'
-            )}</td>
-            <td>${item.package ?? '-'}</td>
-            <td>${Number(item.score) || 0}%</td>
-            <td>${Number(item.speed) || 0}%</td>
-            <td>${Number(item.accuracy) || 0}%</td>
-            <td>${Number(item.consistency) || 0}%</td>
-            <td>${Number(item.endurance) || 0}%</td>
-          `;
-
-          body.appendChild(row);
-        }
-      );
-    } catch (error) {
-      console.error(error);
-
-      $('historyPageCount').textContent =
-        '0';
-
-      empty.hidden = false;
-      table.hidden = true;
-
-      empty.textContent =
-        'Histori gagal dimuat. Coba buka halaman Histori lagi.';
-
-      toast(
-        `Histori gagal dimuat: ${error.message}`,
-        'warning',
-        4500
-      );
-    }
-  }
-
-  function formatDate(value) {
-    const date =
-      new Date(value);
-
-    if (
-      Number.isNaN(
-        date.getTime()
-      )
-    ) {
-      return '-';
-    }
-
-    return date.toLocaleString(
-      'id-ID'
-    );
-  }
-
-  // ============================================================
-  // AUTH
-  // ============================================================
-
-  function showAuth(type) {
-    $('loginPane').hidden =
-      type !== 'login';
-
-    $('registerPane').hidden =
-      type !== 'register';
-
-    $('authTitle').textContent =
-      type === 'login'
-        ? 'Selamat datang kembali'
-        : 'Buat akun peserta';
-
-    $('authSubtitle').textContent =
-      type === 'login'
-        ? 'Masuk untuk menyimpan histori latihan di Google Sheets.'
-        : 'Akun digunakan untuk menyimpan histori latihan di Google Sheets.';
-
-    $('loginError').textContent = '';
-    $('registerError').textContent = '';
-
-    showView('auth');
-  }
-
-  async function handleLogin(event) {
-    event.preventDefault();
-
-    const username =
-      $('loginUsername').value.trim();
-
-    const password =
-      $('loginPassword').value;
-
-    const errorElement =
-      $('loginError');
-
-    errorElement.textContent = '';
-
-    if (!username || !password) {
-      errorElement.textContent =
-        'Username dan password wajib diisi.';
-      return;
-    }
-
-    const button =
-      $('loginForm').querySelector(
-        'button[type="submit"]'
-      );
-
-    setButtonBusy(
-      button,
-      'Memeriksa...'
-    );
-
-    try {
-      const response =
-        await api(
-          'login',
-          {
-            username,
-            password
-          }
-        );
-
-      if (
-        !response?.success ||
-        !response.session
-      ) {
-        throw new Error(
-          response?.message ||
-          'Login gagal.'
-        );
+    $('viewHistoryBtn').addEventListener('click', async () => {
+      if (!state.isGuest) {
+        try { await refreshHistory(); } catch (error) { toast(error.message, 'warning'); }
       }
+      renderHistory();
+      showView('history');
+    });
 
-      state.session =
-        response.session;
+    $('backDashboardBtn').addEventListener('click', () => goDashboard());
+    $('logoutBtn').addEventListener('click', logout);
 
-      state.isGuest = false;
+    $('loginForm').addEventListener('submit', (event) => {
+      event.preventDefault();
+      login();
+    });
 
-      saveSession();
+    $('registerForm').addEventListener('submit', (event) => {
+      event.preventDefault();
+      register();
+    });
 
-      $('welcomeName').textContent =
-        state.session.username;
+    $('resumeTestBtn')?.addEventListener('click', resumePersistedTest);
+    $('startPracticeBtn')?.addEventListener('click', () => openInstruction('kraepelin', 1));
 
-      renderCatalog();
-      showView('dashboard');
-
-      toast(
-        'Login berhasil. Histori terhubung ke Google Sheets.',
-        'success',
-        3500
-      );
-
-      $('loginForm').reset();
-    } catch (error) {
-      console.error(error);
-
-      errorElement.textContent =
-        error.message ||
-        'Login gagal.';
-    } finally {
-      setButtonReady(button);
-    }
-  }
-
-  async function handleRegister(event) {
-    event.preventDefault();
-
-    const username =
-      $('registerUsername').value.trim();
-
-    const password =
-      $('registerPassword').value;
-
-    const confirmation =
-      $('registerConfirm').value;
-
-    const errorElement =
-      $('registerError');
-
-    errorElement.textContent = '';
-
-    if (
-      !/^[A-Za-z0-9_]{3,24}$/.test(username)
-    ) {
-      errorElement.textContent =
-        'Username 3–24 karakter: huruf, angka, underscore.';
-      return;
-    }
-
-    if (password.length < 8) {
-      errorElement.textContent =
-        'Password minimal 8 karakter.';
-      return;
-    }
-
-    if (password !== confirmation) {
-      errorElement.textContent =
-        'Konfirmasi password belum sama.';
-      return;
-    }
-
-    const button =
-      $('registerForm').querySelector(
-        'button[type="submit"]'
-      );
-
-    setButtonBusy(
-      button,
-      'Membuat akun...'
-    );
-
-    try {
-      const response =
-        await api(
-          'register',
-          {
-            username,
-            password
-          }
-        );
-
-      if (
-        !response?.success ||
-        !response.session
-      ) {
-        throw new Error(
-          response?.message ||
-          'Pendaftaran gagal.'
-        );
+    window.addEventListener('keydown', (event) => {
+      if (document.body.dataset.view !== 'test') return;
+      if (TESTS[state.test]?.kind !== 'kraepelin') return;
+      if (/^[0-9]$/.test(event.key)) {
+        answerKraepelin(Number(event.key));
       }
-
-      state.session =
-        response.session;
-
-      state.isGuest = false;
-
-      saveSession();
-
-      $('welcomeName').textContent =
-        state.session.username;
-
-      renderCatalog();
-      showView('dashboard');
-
-      toast(
-        'Akun berhasil dibuat dan tersambung ke Google Sheets.',
-        'success',
-        3500
-      );
-
-      $('registerForm').reset();
-    } catch (error) {
-      console.error(error);
-
-      errorElement.textContent =
-        error.message ||
-        'Pendaftaran gagal.';
-    } finally {
-      setButtonReady(button);
-    }
-  }
-
-  async function logout() {
-    const currentSession =
-      state.session;
-
-    state.session = null;
-    state.isGuest = false;
-
-    saveSession();
-    showView('landing');
-
-    if (currentSession?.token) {
-      try {
-        await api(
-          'logout',
-          {
-            token:
-              currentSession.token
-          }
-        );
-      } catch (error) {
-        console.warn(
-          'Logout backend gagal:',
-          error
-        );
-      }
-    }
-
-    toast(
-      'Kamu sudah keluar.',
-      'success'
-    );
-  }
-
-  function setButtonBusy(
-    button,
-    label
-  ) {
-    if (!button) {
-      return;
-    }
-
-    button.dataset.originalText =
-      button.textContent;
-
-    button.disabled = true;
-    button.textContent = label;
-  }
-
-  function setButtonReady(button) {
-    if (!button) {
-      return;
-    }
-
-    button.disabled = false;
-
-    if (button.dataset.originalText) {
-      button.textContent =
-        button.dataset.originalText;
-    }
-  }
-
-  // ============================================================
-  // MISC / EVENTS
-  // ============================================================
-
-  function stopTimer() {
-    if (state.timerId) {
-      window.clearInterval(
-        state.timerId
-      );
-
-      state.timerId = null;
-    }
-  }
-
-  function resetTestState() {
-    stopTimer();
-
-    state.questions = [];
-    state.answers = [];
-    state.columns = [];
-
-    state.index = 0;
-    state.columnIndex = 0;
-    state.questionIndex = 0;
-
-    state.lastResult = null;
-    state.locked = false;
-    state.finished = false;
-    state.test = null;
-    state.package = 1;
-  }
-
-  function escapeHtml(value) {
-    return String(value).replace(
-      /[&<>'"]/g,
-      (character) => ({
-        '&': '&amp;',
-        '<': '&lt;',
-        '>': '&gt;',
-        "'": '&#39;',
-        '"': '&quot;'
-      }[character])
-    );
-  }
-
-  function bindEvents() {
-    $('landingLoginBtn')
-      ?.addEventListener(
-        'click',
-        () => showAuth('login')
-      );
-
-    $('landingRegisterBtn')
-      ?.addEventListener(
-        'click',
-        () => showAuth('register')
-      );
-
-    $('landingGuestBtn')
-      ?.addEventListener(
-        'click',
-        () => {
-          $('guestModal').hidden = false;
-        }
-      );
-
-    $('cancelGuestBtn')
-      ?.addEventListener(
-        'click',
-        () => {
-          $('guestModal').hidden = true;
-        }
-      );
-
-    $('confirmGuestBtn')
-      ?.addEventListener(
-        'click',
-        () => {
-          $('guestModal').hidden = true;
-          enterGuestMode();
-
-          toast(
-            'Mode tamu aktif.',
-            'success'
-          );
-        }
-      );
-
-    $('backToLandingBtn')
-      ?.addEventListener(
-        'click',
-        () => showView('landing')
-      );
-
-    $('openRegisterFromLogin')
-      ?.addEventListener(
-        'click',
-        () => showAuth('register')
-      );
-
-    $('openLoginFromRegister')
-      ?.addEventListener(
-        'click',
-        () => showAuth('login')
-      );
-
-    $('backFromInstructionBtn')
-      ?.addEventListener(
-        'click',
-        () => showView('dashboard')
-      );
-
-    $('startTestBtn')
-      ?.addEventListener(
-        'click',
-        startTest
-      );
-
-    $('testHomeBtn')
-      ?.addEventListener(
-        'click',
-        () => {
-          $('confirmModal').hidden = false;
-        }
-      );
-
-    $('cancelEndTestBtn')
-      ?.addEventListener(
-        'click',
-        () => {
-          $('confirmModal').hidden = true;
-        }
-      );
-
-    $('confirmEndTestBtn')
-      ?.addEventListener(
-        'click',
-        () => {
-          $('confirmModal').hidden = true;
-          resetTestState();
-          showView('dashboard');
-
-          toast(
-            'Tes dibatalkan.',
-            'warning'
-          );
-        }
-      );
-
-    $('downloadPdfBtn')
-      ?.addEventListener(
-        'click',
-        downloadPdf
-      );
-
-    $('resultHistoryBtn')
-      ?.addEventListener(
-        'click',
-        async () => {
-          await renderHistory();
-          showView('history');
-        }
-      );
-
-    $('finishBtn')
-      ?.addEventListener(
-        'click',
-        () => {
-          resetTestState();
-
-          if (state.isGuest) {
-            leaveGuestMode();
-          }
-
-          if (state.session) {
-            $('welcomeName').textContent =
-              state.session.username;
-          } else {
-            $('welcomeName').textContent =
-              'Tamu';
-          }
-
-          showView('dashboard');
-        }
-      );
-
-    $('viewHistoryBtn')
-      ?.addEventListener(
-        'click',
-        async () => {
-          if (!state.session?.token) {
-            toast(
-              'Histori hanya tersedia setelah login.',
-              'warning'
-            );
-            return;
-          }
-
-          await renderHistory();
-          showView('history');
-        }
-      );
-
-    $('backDashboardBtn')
-      ?.addEventListener(
-        'click',
-        () => showView('dashboard')
-      );
-
-    $('logoutBtn')
-      ?.addEventListener(
-        'click',
-        logout
-      );
-
-    $('loginForm')
-      ?.addEventListener(
-        'submit',
-        handleLogin
-      );
-
-    $('registerForm')
-      ?.addEventListener(
-        'submit',
-        handleRegister
-      );
-
-    window.addEventListener(
-      'keydown',
-      (event) => {
-        if (
-          document.body.dataset.view !== 'test' ||
-          TESTS[state.test]?.kind !== 'kraepelin'
-        ) {
-          return;
-        }
-
-        if (/^[0-9]$/.test(event.key)) {
-          event.preventDefault();
-          answerKraepelin(
-            Number(event.key)
-          );
-        }
-      }
-    );
-
-    window.addEventListener(
-      'beforeunload',
-      stopTimer
-    );
+    });
   }
 
   // ============================================================
   // INIT
   // ============================================================
 
-  function init() {
-    bindEvents();
+  async function init() {
+    bind();
+
+    state.session = loadSession();
+    state.isGuest = false;
+
     renderCatalog();
 
-    state.session =
-      loadSession();
-
     if (state.session) {
-      state.isGuest = false;
-
-      $('welcomeName').textContent =
-        state.session.username;
-
+      $('welcomeName').textContent = state.session.username;
       showView('dashboard');
+
+      try {
+        await refreshHistory();
+      } catch (error) {
+        toast(`Belum dapat mengambil histori: ${error.message}`, 'warning', 4500);
+      }
+
+      if (loadPersistedTest()) {
+        // Dashboard Fase 4 tetap ringan; user memilih lanjutkan dari data lokal.
+        toast('Ada progress tes yang tersimpan. Kamu bisa melanjutkannya dari sesi ini.', 'info', 4200);
+      }
     } else {
       showView('landing');
     }
