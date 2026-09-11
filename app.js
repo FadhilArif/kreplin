@@ -1277,7 +1277,7 @@
   function renderResult(result) {
     const name = state.isGuest ? 'Tamu' : state.session?.username || 'Peserta';
     $('resultTitle').textContent = `${TESTS[result.type].name} selesai 🎉`;
-    $('resultUsername').textContent = name;
+
 
     $('resultIntro').innerHTML = state.isGuest
       ? 'Hasil mode <strong>Tamu</strong> tidak disimpan ke histori. <strong>Download PDF</strong> untuk menyimpan salinannya.'
