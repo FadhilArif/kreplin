@@ -26,7 +26,34 @@
 
 <section id="dashboardView" class="screen"><div class="dashboard-shell"><header class="topbar card"><div class="topbar-brand"><div class="brand-badge small"><span class="brand-dot"></span>PSYCHOTEST PRACTICE</div><div>Halo, <strong id="welcomeName">—</strong> 👋</div></div><button id="logoutBtn" class="ghost-btn">Keluar</button></header>
 <div class="dashboard-hero card"><div><div class="eyebrow">HOME</div><h2>Pilih latihan yang mau kamu kerjakan.</h2><p class="muted">Setiap tes memiliki 3 paket. Pilih paket, baca instruksi, lalu mulai latihan.</p></div><button id="viewHistoryBtn" class="secondary-btn">📜 Histori</button></div>
+<div class="dashboard-summary-grid">
+  <div class="dashboard-stat card"><span>Total tes</span><strong id="historyCount">0</strong><small>Riwayat akun</small></div>
+  <div class="dashboard-stat card"><span>Tes terakhir</span><strong id="latestDate">—</strong><small>Waktu pengerjaan terakhir</small></div>
+  <div class="dashboard-stat card"><span>Kecepatan</span><strong id="dashSpeed">—</strong><small>Hasil terakhir</small></div>
+  <div class="dashboard-stat card"><span>Ketelitian</span><strong id="dashAccuracy">—</strong><small>Hasil terakhir</small></div>
+  <div class="dashboard-stat card"><span>Konsistensi</span><strong id="dashConsistency">—</strong><small>Hasil terakhir</small></div>
+  <div class="dashboard-stat card"><span>Ketahanan</span><strong id="dashEndurance">—</strong><small>Hasil terakhir</small></div>
+ </div>
 <div id="testCatalog" class="test-catalog"></div></div></section>
+<section id="adminView" class="screen"><div class="admin-shell">
+  <header class="topbar card admin-topbar"><div class="topbar-brand"><div class="brand-badge small"><span class="brand-dot"></span>PSYCHOTEST PRACTICE</div><div><strong>Admin Panel</strong> · <span id="adminWelcomeName">—</span></div></div><button id="adminLogoutBtn" class="ghost-btn">Keluar</button></header>
+  <div class="admin-hero card"><div><div class="eyebrow">ADMINISTRATOR</div><h2>Pusat pengelolaan Psychotest</h2><p class="muted">Kelola peserta, hasil tes, bank soal, dan label nilai dari satu halaman.</p></div></div>
+  <div class="admin-stats-grid">
+    <div class="admin-stat card"><span>Peserta</span><strong id="adminUsersStat">0</strong><small>akun terdaftar</small></div>
+    <div class="admin-stat card"><span>Total tes</span><strong id="adminTestsStat">0</strong><small>hasil tersimpan</small></div>
+    <div class="admin-stat card"><span>Rata-rata skor</span><strong id="adminAverageStat">0%</strong><small>seluruh hasil</small></div>
+    <div class="admin-stat card"><span>Admin</span><strong id="adminAdminsStat">0</strong><small>akun berwenang</small></div>
+  </div>
+  <nav class="admin-nav card" aria-label="Menu admin">
+    <button type="button" data-admin-tab="overview">🏠 Overview</button>
+    <button type="button" data-admin-tab="users">👥 Peserta</button>
+    <button type="button" data-admin-tab="results">📊 Hasil Tes</button>
+    <button type="button" data-admin-tab="questions">🧩 Bank Soal</button>
+    <button type="button" data-admin-tab="labels">🏷️ Label Nilai</button>
+  </nav>
+  <div id="adminPanel"></div>
+</div></section>
+
 <section id="instructionView" class="screen"><div class="instruction-card card"><button id="backFromInstructionBtn" class="back-link">← Kembali</button><div class="section-heading"><div><div class="eyebrow" id="instructionEyebrow">INSTRUKSI</div><h2 id="instructionTitle">—</h2></div><div class="step-count" id="instructionPackage">Paket 1</div></div><p id="instructionLead" class="instruction-lead"></p><div id="instructionBody"></div><div class="warning-box"><strong>Catatan latihan:</strong> skor website ini adalah indikator latihan internal, bukan norma resmi seleksi kerja atau diagnosis psikologis.</div><button id="startTestBtn" class="primary-btn large-btn">Mulai Tes →</button></div></section>
 
 <section id="testView" class="screen test-screen"><div class="test-shell"><header class="test-header"><button id="testHomeBtn" class="home-btn">⌂</button><div class="progress-meta"><div class="meta-item"><span>Tes</span><strong id="testTypeLabel">—</strong></div><div class="meta-item"><span>Soal</span><strong id="questionCounter">1/20</strong></div><div class="meta-item"><span>Waktu</span><strong id="timeCounter">—</strong></div></div><div class="progress-track"><div id="progressBar" class="progress-bar"></div></div></header>
