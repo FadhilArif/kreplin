@@ -138,6 +138,7 @@
     questions: [],
     answers: [],
     questionTimes: [],
+    kraepelinQuestionTimes: [],
     index: 0,
     columns: [],
     colIndex: 0,
@@ -1107,6 +1108,7 @@
     const normalizedType = item?.test_type || 'kuantitatif';
 
     return {
+      testId: item?.test_id || '',
       type: normalizedType,
       package: Number(item?.package) || 1,
       answered: Number(item?.answered) || (Number(item?.correct) || 0) + (Number(item?.wrong) || 0),
@@ -1140,6 +1142,15 @@
         result = state.lastResult;
       } else {
         result = historyItemToResult(item);
+
+        // Histori dibuat dari TestHistory, lalu detail soal
+        // diambil dari TestDetail agar grafik bisa direkonstruksi.
+        try {
+          const details = await loadTestDetail(item.test_id);
+          enrichHistoryResultWithDetail(result, details);
+        } catch (detailError) {
+          console.warn('Detail histori tidak tersedia:', detailError);
+        }
       }
 
       const participant =
@@ -1656,12 +1667,17 @@ async function loadKuantitatifPackage(packageNumber) {
       { length: CONFIG.KRAEPELIN_COLUMNS },
       () => Array(CONFIG.KRAEPELIN_QUESTIONS).fill(null),
     );
+    state.kraepelinQuestionTimes = Array.from(
+      { length: CONFIG.KRAEPELIN_COLUMNS },
+      () => Array(CONFIG.KRAEPELIN_QUESTIONS).fill(null),
+    );
     state.colIndex = 0;
     state.qIndex = 0;
     state.questions = [];
 
     renderKraepelin();
     showView('test');
+    state.questionStartedAt = Date.now();
     startColumnTimer();
   }
 
@@ -1714,11 +1730,22 @@ async function loadKuantitatifPackage(packageNumber) {
   function answerKraepelin(digit) {
     if (state.answers[state.colIndex][state.qIndex] !== null) return;
 
+    const elapsedSeconds = Math.max(
+      0,
+      Math.min(
+        CONFIG.KRAEPELIN_SECONDS,
+        (Date.now() - state.questionStartedAt) / 1000
+      )
+    );
+
     state.answers[state.colIndex][state.qIndex] = Number(digit);
+    state.kraepelinQuestionTimes[state.colIndex][state.qIndex] =
+      Number(elapsedSeconds.toFixed(2));
 
     if (state.qIndex < CONFIG.KRAEPELIN_QUESTIONS - 1) {
       state.qIndex += 1;
       renderKraepelin();
+      state.questionStartedAt = Date.now();
     } else {
       nextColumn();
     }
@@ -1735,6 +1762,7 @@ async function loadKuantitatifPackage(packageNumber) {
     state.colIndex += 1;
     state.qIndex = 0;
     renderKraepelin();
+    state.questionStartedAt = Date.now();
     startColumnTimer();
     persistTest();
   }
@@ -2093,6 +2121,7 @@ async function loadKuantitatifPackage(packageNumber) {
           questions: state.questions,
           answers: state.answers,
           questionTimes: state.questionTimes,
+          kraepelinQuestionTimes: state.kraepelinQuestionTimes,
           index: state.index,
           columns: state.columns,
           colIndex: state.colIndex,
@@ -2137,6 +2166,12 @@ async function loadKuantitatifPackage(packageNumber) {
     state.questionTimes = Array.isArray(saved.questionTimes)
       ? saved.questionTimes
       : Array(state.questions.length).fill(null);
+    state.kraepelinQuestionTimes = Array.isArray(saved.kraepelinQuestionTimes)
+      ? saved.kraepelinQuestionTimes
+      : Array.from(
+          { length: CONFIG.KRAEPELIN_COLUMNS },
+          () => Array(CONFIG.KRAEPELIN_QUESTIONS).fill(null),
+        );
     state.index = Number(saved.index) || 0;
     state.columns = Array.isArray(saved.columns) ? saved.columns : [];
     state.colIndex = Number(saved.colIndex) || 0;
@@ -2147,6 +2182,7 @@ async function loadKuantitatifPackage(packageNumber) {
     if (TESTS[state.test]?.kind === 'kraepelin') {
       renderKraepelin();
       showView('test');
+      state.questionStartedAt = Date.now();
       startColumnTimer();
     } else {
       renderMCQ();
@@ -2161,6 +2197,143 @@ async function loadKuantitatifPackage(packageNumber) {
   // ============================================================
   // FINISH + SAVE HISTORY
   // ============================================================
+
+  function buildTestDetailRows(result) {
+    const testType = result.type;
+    const packageNumber = result.package;
+    const rows = [];
+
+    if (testType === 'kraepelin') {
+      for (let col = 0; col < CONFIG.KRAEPELIN_COLUMNS; col += 1) {
+        for (let q = 0; q < CONFIG.KRAEPELIN_QUESTIONS; q += 1) {
+          const answer = state.answers[col]?.[q] ?? null;
+          const time = state.kraepelinQuestionTimes[col]?.[q] ?? '';
+          const top = state.columns[col]?.[25 - q] ?? 0;
+          const bottom = state.columns[col]?.[26 - q] ?? 0;
+          const expected = (top + bottom) % 10;
+          const answered = answer !== null;
+
+          rows.push({
+            test_id: state.currentTestId,
+            test_type: testType,
+            package: packageNumber,
+            no_soal: col * CONFIG.KRAEPELIN_QUESTIONS + q + 1,
+            kolom: col + 1,
+            no_soal_dalam_kolom: q + 1,
+            waktu_detik: time,
+            jawaban: answered ? String(answer) : '',
+            benar: answered && Number(answer) === expected,
+          });
+        }
+      }
+
+      return rows;
+    }
+
+    return state.questions.map((question, index) => {
+      const answer = state.answers[index];
+      const answered = answer !== null;
+
+      return {
+        test_id: state.currentTestId,
+        test_type: testType,
+        package: packageNumber,
+        no_soal: index + 1,
+        kolom: '',
+        no_soal_dalam_kolom: '',
+        waktu_detik: state.questionTimes[index] ?? '',
+        jawaban: answered ? String.fromCharCode(65 + answer) : '',
+        benar:
+          answered &&
+          answer === question.correct,
+      };
+    });
+  }
+
+  async function saveTestDetail(result) {
+    if (
+      state.isGuest ||
+      !state.session?.token ||
+      !result?.testId
+    ) {
+      return false;
+    }
+
+    const rows = buildTestDetailRows(result);
+
+    if (!rows.length) {
+      return true;
+    }
+
+    const chunkSize = 250;
+
+    try {
+      for (let start = 0; start < rows.length; start += chunkSize) {
+        const chunk = rows.slice(start, start + chunkSize);
+
+        await apiChecked('saveTestDetail', {
+          token: state.session.token,
+          test_id: result.testId,
+          details: chunk,
+        });
+      }
+
+      return true;
+    } catch (error) {
+      console.error('TestDetail gagal disimpan:', error);
+      return false;
+    }
+  }
+
+  async function loadTestDetail(testId) {
+    if (!state.session?.token || !testId) {
+      return [];
+    }
+
+    const response = await apiChecked('getTestDetail', {
+      token: state.session.token,
+      test_id: testId,
+    });
+
+    return Array.isArray(response.details)
+      ? response.details
+      : [];
+  }
+
+  function enrichHistoryResultWithDetail(result, details) {
+    if (!Array.isArray(details) || !details.length) {
+      return result;
+    }
+
+    const sorted = [...details].sort(
+      (a, b) => Number(a.no_soal || 0) - Number(b.no_soal || 0)
+    );
+
+    if (result.type === 'kraepelin') {
+      const counts = Array(CONFIG.KRAEPELIN_COLUMNS).fill(0);
+
+      sorted.forEach((item) => {
+        if (
+          Number(item.kolom) >= 1 &&
+          Number(item.kolom) <= CONFIG.KRAEPELIN_COLUMNS &&
+          String(item.jawaban ?? '') !== ''
+        ) {
+          counts[Number(item.kolom) - 1] += 1;
+        }
+      });
+
+      result.chart = counts;
+      return result;
+    }
+
+    result.chart = sorted.map((item) => ({
+      time: Number(item.waktu_detik || 0),
+      correct: Boolean(item.benar),
+      answered: String(item.jawaban ?? '') !== '',
+    }));
+
+    return result;
+  }
 
   async function saveHistory(result) {
     if (state.isGuest || !state.session?.token || state.savingHistory) return false;
@@ -2212,9 +2385,19 @@ async function loadKuantitatifPackage(packageNumber) {
     drawChart(result);
     showView('result');
 
-    await saveHistory(result);
+    const historySaved = await saveHistory(result);
 
-    if (!state.isGuest) {
+    if (!state.isGuest && historySaved) {
+      const detailSaved = await saveTestDetail(result);
+
+      if (!detailSaved) {
+        toast(
+          'Ringkasan tersimpan, tetapi detail per soal belum berhasil disimpan.',
+          'warning',
+          5000
+        );
+      }
+
       try {
         await refreshHistory();
         toast('Hasil tersimpan ke Google Sheets.', 'success');
