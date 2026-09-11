@@ -710,24 +710,39 @@
 
   function showAuth(mode) {
     const registerMode = mode === 'register';
-    $('loginPane').hidden = registerMode;
+    const forgotMode = mode === 'forgot';
+
+    $('loginPane').hidden = registerMode || forgotMode;
     $('registerPane').hidden = !registerMode;
-    $('authTitle').textContent = registerMode ? 'Buat akun peserta' : 'Selamat datang kembali';
+    $('forgotPane').hidden = !forgotMode;
+    if ($('resetPane')) $('resetPane').hidden = true;
+
+    $('authTitle').textContent = registerMode
+      ? 'Buat akun peserta'
+      : forgotMode
+        ? 'Lupa password'
+        : 'Selamat datang kembali';
     $('authSubtitle').textContent = registerMode
       ? 'Akun digunakan untuk menyimpan histori latihan di Google Sheets.'
-      : 'Masuk untuk melanjutkan latihan dan melihat histori.';
+      : forgotMode
+        ? 'Masukkan username atau email akunmu, kami kirimkan link reset password ke email terdaftar.'
+        : 'Masuk untuk melanjutkan latihan dan melihat histori.';
 
     $('loginError').textContent = '';
     $('registerError').textContent = '';
+    if ($('forgotError')) $('forgotError').textContent = '';
+    if ($('forgotSuccess')) $('forgotSuccess').textContent = '';
+
     showView('auth');
 
     setTimeout(() => {
-      $(registerMode ? 'registerUsername' : 'loginUsername')?.focus();
+      $(registerMode ? 'registerUsername' : forgotMode ? 'forgotIdentifier' : 'loginUsername')?.focus();
     }, 30);
   }
 
   async function register() {
     const username = $('registerUsername').value.trim();
+    const email = $('registerEmail').value.trim();
     const password = $('registerPassword').value;
     const confirm = $('registerConfirm').value;
     const error = $('registerError');
@@ -736,6 +751,10 @@
 
     if (!/^[A-Za-z0-9_]{3,24}$/.test(username)) {
       error.textContent = 'Username 3–24 karakter: huruf, angka, underscore.';
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      error.textContent = 'Format email tidak valid.';
       return;
     }
     if (password.length < 8) {
@@ -750,7 +769,7 @@
     busy(button, 'Membuat akun…', true);
 
     try {
-      const response = await apiChecked('register', { username, password });
+      const response = await apiChecked('register', { username, password, email });
       state.session = response.session;
       state.isGuest = false;
       saveSession();
@@ -786,6 +805,70 @@
       await goDashboard('Login berhasil.');
     } catch (errorObject) {
       error.textContent = errorObject.message || 'Login gagal.';
+    } finally {
+      busy(button, '', false);
+    }
+  }
+
+  async function requestReset() {
+    const identifier = $('forgotIdentifier').value.trim();
+    const error = $('forgotError');
+    const success = $('forgotSuccess');
+    const button = $('forgotForm').querySelector('button[type="submit"]');
+    error.textContent = '';
+    success.textContent = '';
+
+    if (!identifier) {
+      error.textContent = 'Masukkan username atau email dulu.';
+      return;
+    }
+
+    busy(button, 'Mengirim…', true);
+
+    try {
+      const appUrl = `${location.origin}${location.pathname}`;
+      const response = await apiChecked('requestPasswordReset', { identifier, appUrl });
+      success.textContent = response.message || 'Kalau akun ditemukan, link reset sudah dikirim ke email terdaftar.';
+      $('forgotForm').reset();
+    } catch (errorObject) {
+      error.textContent = errorObject.message || 'Gagal mengirim link reset.';
+    } finally {
+      busy(button, '', false);
+    }
+  }
+
+  async function submitNewPassword(token) {
+    const password = $('resetPassword').value;
+    const confirm = $('resetConfirm').value;
+    const error = $('resetError');
+    const button = $('resetForm').querySelector('button[type="submit"]');
+    error.textContent = '';
+
+    if (password.length < 8) {
+      error.textContent = 'Password minimal 8 karakter.';
+      return;
+    }
+    if (password !== confirm) {
+      error.textContent = 'Konfirmasi password belum sama.';
+      return;
+    }
+
+    busy(button, 'Menyimpan…', true);
+
+    try {
+      const response = await apiChecked('resetPassword', { token, password });
+      toast(response.message || 'Password berhasil diganti.', 'success', 3600);
+      $('resetForm').reset();
+
+      // Bersihkan token dari URL supaya tidak bisa dipakai ulang lewat tombol back,
+      // lalu arahkan balik ke pane login.
+      const url = new URL(location.href);
+      url.searchParams.delete('reset');
+      history.replaceState({}, '', url.toString());
+
+      showAuth('login');
+    } catch (errorObject) {
+      error.textContent = errorObject.message || 'Gagal mengganti password.';
     } finally {
       busy(button, '', false);
     }
@@ -1502,6 +1585,24 @@
     $('backToLandingBtn').addEventListener('click', () => showView('landing'));
     $('openRegisterFromLogin').addEventListener('click', () => showAuth('register'));
     $('openLoginFromRegister').addEventListener('click', () => showAuth('login'));
+    $('openForgotFromLogin')?.addEventListener('click', () => showAuth('forgot'));
+    $('backToLoginFromForgot')?.addEventListener('click', () => showAuth('login'));
+
+    $('forgotForm')?.addEventListener('submit', (event) => {
+      event.preventDefault();
+      requestReset();
+    });
+
+    $('resetForm')?.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const params = new URLSearchParams(location.search);
+      const token = params.get('reset');
+      if (!token) {
+        $('resetError').textContent = 'Token reset tidak ditemukan di URL.';
+        return;
+      }
+      submitNewPassword(token);
+    });
 
     $('backFromInstructionBtn').addEventListener('click', () => showView('dashboard'));
     $('startTestBtn').addEventListener('click', startTest);
@@ -1567,6 +1668,20 @@
 
   async function init() {
     bind();
+
+    const params = new URLSearchParams(location.search);
+    const resetToken = params.get('reset');
+
+    if (resetToken) {
+      $('loginPane').hidden = true;
+      $('registerPane').hidden = true;
+      $('forgotPane').hidden = true;
+      $('resetPane').hidden = false;
+      $('authTitle').textContent = 'Buat password baru';
+      $('authSubtitle').textContent = 'Masukkan password baru untuk akunmu. Link ini berlaku 30 menit.';
+      showView('auth');
+      return;
+    }
 
     state.session = loadSession();
     state.isGuest = false;
