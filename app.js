@@ -282,6 +282,25 @@
     waiter.resolve(message.data);
   });
 
+  function pollOnce(nonce, onReady) {
+    const callbackName = `psychotestPoll_${nonce.replace(/[^a-zA-Z0-9]/g, '')}`;
+    const script = document.createElement('script');
+
+    const cleanupScript = () => {
+      delete window[callbackName];
+      script.remove();
+    };
+
+    window[callbackName] = (result) => {
+      cleanupScript();
+      onReady(result);
+    };
+
+    script.src = `${CONFIG.API_URL}?action=poll&nonce=${encodeURIComponent(nonce)}&callback=${encodeURIComponent(callbackName)}`;
+    script.onerror = cleanupScript;
+    document.body.appendChild(script);
+  }
+
   function api(action, payload = {}, timeoutMs = 20000) {
     return new Promise((resolve, reject) => {
       if (!CONFIG.API_URL) {
@@ -291,6 +310,9 @@
 
       const frame = ensureApiFrame();
       const nonce = makeNonce();
+      let settled = false;
+      let pollTimer = null;
+      let overallTimeoutId = null;
 
       const form = document.createElement('form');
       form.method = 'POST';
@@ -316,25 +338,63 @@
       form.append(dataInput, nonceInput);
       document.body.appendChild(form);
 
-      const timeoutId = setTimeout(() => {
+      function finish(fn, value) {
+        if (settled) return;
+        settled = true;
+        clearInterval(pollTimer);
+        clearTimeout(overallTimeoutId);
         apiWaiters.delete(nonce);
         form.remove();
-        reject(new Error('Backend tidak merespons dalam 20 detik. Pastikan deployment Apps Script terbaru sudah dipublikasikan.'));
-      }, timeoutMs);
+        fn(value);
+      }
 
-      apiWaiters.set(nonce, { resolve, reject, timeoutId });
+      // Jalur cepat: dipakai kalau postMessage kebetulan berhasil sampai.
+      apiWaiters.set(nonce, {
+        resolve: (data) => finish(resolve, data),
+        reject: (err) => finish(reject, err),
+        timeoutId: null,
+      });
+
+      // Jalur utama yang andal: polling via JSONP ke doGet?action=poll.
+      // Tidak tunduk pada CORS/postMessage, jadi tidak terpengaruh masalah
+      // Cross-Origin-Opener-Policy yang bisa mematikan window.parent.postMessage.
+      pollTimer = setInterval(() => {
+        if (settled) return;
+        pollOnce(nonce, (result) => {
+          if (settled || !result?.ready) return;
+
+          if (result.data?.success) {
+            finish(resolve, result.data);
+          } else {
+            finish(reject, new Error(result.data?.message || 'Backend gagal memproses permintaan.'));
+          }
+        });
+      }, 700);
+
+      overallTimeoutId = setTimeout(() => {
+        finish(reject, new Error('Backend tidak merespons dalam waktu yang ditentukan. Pastikan deployment Apps Script terbaru sudah dipublikasikan.'));
+      }, timeoutMs);
 
       try {
         form.submit();
       } catch (error) {
-        clearTimeout(timeoutId);
-        apiWaiters.delete(nonce);
-        form.remove();
-        reject(new Error(`Gagal mengirim request: ${error.message || error}`));
+        finish(reject, new Error(`Gagal mengirim request: ${error.message || error}`));
         return;
       }
 
-      setTimeout(() => form.remove(), 1500);
+      // Mulai polling pertama sedikit setelah submit, tanpa menunggu interval penuh.
+      setTimeout(() => {
+        if (!settled) {
+          pollOnce(nonce, (result) => {
+            if (settled || !result?.ready) return;
+            if (result.data?.success) {
+              finish(resolve, result.data);
+            } else {
+              finish(reject, new Error(result.data?.message || 'Backend gagal memproses permintaan.'));
+            }
+          });
+        }
+      }, 400);
     });
   }
 
