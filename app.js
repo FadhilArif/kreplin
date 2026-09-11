@@ -119,15 +119,14 @@
   const $ = (id) => document.getElementById(id);
 
   const views = {
-  landing: $('landingView'),
-  auth: $('authView'),
-  dashboard: $('dashboardView'),
-  instruction: $('instructionView'),
-  test: $('testView'),
-  result: $('resultView'),
-  history: $('historyView'),
-  admin: $('adminView'),
-};
+    landing: $('landingView'),
+    auth: $('authView'),
+    dashboard: $('dashboardView'),
+    instruction: $('instructionView'),
+    test: $('testView'),
+    result: $('resultView'),
+    history: $('historyView'),
+  };
 
   const state = {
     session: null,
@@ -2979,22 +2978,29 @@ async function loadKuantitatifPackage(packageNumber) {
 
   function renderAdminQuestions() {
     $('adminPanel').innerHTML = `
-      <div class="admin-panel-head"><div><div class="eyebrow">BANK SOAL</div><h2>Kelola soal MCQ</h2><p class="muted">Upload JSON lama untuk memindahkan soal ke Sheet, lalu edit atau nonaktifkan langsung dari sini.</p></div></div>
+      <div class="admin-panel-head">
+        <div>
+          <div class="eyebrow">BANK SOAL</div>
+          <h2>Kelola soal MCQ</h2>
+          <p class="muted">Satu file JSON dapat berisi Paket 1, 2, dan 3 sekaligus. Paket di bawah ini hanya untuk memfilter soal yang ditampilkan.</p>
+        </div>
+      </div>
       <div class="admin-card card">
         <div class="admin-filter-grid admin-question-tools">
           <label>Tes<select id="adminQuestionTest">${ADMIN_TEST_OPTIONS.map((item) => `<option value="${item.id}">${escapeHtml(item.name)}</option>`).join('')}</select></label>
-          <label>Paket<select id="adminQuestionPackage"><option value="1">Paket 1</option><option value="2">Paket 2</option><option value="3">Paket 3</option></select></label>
+          <label>Paket (filter)<select id="adminQuestionPackage"><option value="">Semua Paket</option><option value="1">Paket 1</option><option value="2">Paket 2</option><option value="3">Paket 3</option></select></label>
           <label>Upload JSON<input id="adminQuestionFile" type="file" accept="application/json,.json"></label>
-          <button type="button" class="primary-btn" id="adminUploadQuestionBtn">Upload / Migrasikan</button>
-          <button type="button" class="secondary-btn" id="adminMigrateAllBtn">⚡ Migrasikan Semua JSON</button>
+          <button type="button" class="primary-btn" id="adminUploadQuestionBtn">Upload JSON</button>
+          <button type="button" class="secondary-btn" id="adminMigrateAllQuestionsBtn">⚡ Migrasikan Semua JSON</button>
           <button type="button" class="secondary-btn" id="adminLoadQuestionsBtn">Muat Soal</button>
         </div>
-        <div class="warning-box"><strong>Format:</strong> file JSON mengikuti struktur <code>kategori → paket[] → soal[]</code> yang sekarang dipakai website. Upload satu file tes setiap kali.</div>
+        <div class="warning-box"><strong>Format:</strong> file JSON mengikuti struktur <code>kategori → paket[] → soal[]</code>. Upload tidak perlu memilih paket karena semua paket di dalam file akan diproses otomatis. Sistem mengirim maksimal 25 soal per request agar migrasi aman.</div>
+        <div id="adminQuestionProgress" class="admin-muted" style="margin-top:10px"></div>
       </div>
-      <div class="admin-card card"><div class="admin-table-title"><h3>Soal tersimpan</h3><span id="adminQuestionCount" class="admin-muted">0 soal</span></div><div class="table-wrap admin-table-wrap"><table><thead><tr><th>No</th><th>Pertanyaan</th><th>Jawaban</th><th>Status</th><th>Aksi</th></tr></thead><tbody id="adminQuestionsBody"></tbody></table></div></div>
+      <div class="admin-card card"><div class="admin-table-title"><h3>Soal tersimpan</h3><span id="adminQuestionCount" class="admin-muted">0 soal</span></div><div class="table-wrap admin-table-wrap"><table><thead><tr><th>Paket</th><th>No</th><th>Pertanyaan</th><th>Jawaban</th><th>Status</th><th>Aksi</th></tr></thead><tbody id="adminQuestionsBody"></tbody></table></div></div>
     `;
     $('adminUploadQuestionBtn').addEventListener('click', adminUploadQuestionFile);
-    $('adminMigrateAllBtn').addEventListener('click', adminMigrateAllQuestions);
+    $('adminMigrateAllQuestionsBtn').addEventListener('click', adminMigrateAllQuestions);
     $('adminLoadQuestionsBtn').addEventListener('click', adminLoadQuestions);
     $('adminQuestionTest').addEventListener('change', adminLoadQuestions);
     $('adminQuestionPackage').addEventListener('change', adminLoadQuestions);
@@ -3005,71 +3011,148 @@ async function loadKuantitatifPackage(packageNumber) {
 
   async function adminLoadQuestions() {
     try {
-      const response = await apiChecked('adminGetQuestions', { token: state.session.token, test_type: $('adminQuestionTest').value, package: Number($('adminQuestionPackage').value), include_inactive: true });
+      const packageValue = $('adminQuestionPackage').value;
+      const response = await apiChecked('adminGetQuestions', {
+        token: state.session.token,
+        test_type: $('adminQuestionTest').value,
+        package: packageValue === '' ? 0 : Number(packageValue),
+        include_inactive: true
+      });
       adminQuestionsCache = response.questions || [];
       $('adminQuestionCount').textContent = `${adminQuestionsCache.length} soal`;
       $('adminQuestionsBody').innerHTML = adminQuestionsCache.length ? adminQuestionsCache.map((q) => `
-        <tr><td>${Number(q.no_soal) || 0}</td><td class="admin-question-cell">${escapeHtml(q.question)}</td><td><strong>${escapeHtml(q.answer)}</strong></td><td><span class="admin-role ${q.active ? '' : 'admin-role-off'}">${q.active ? 'Aktif' : 'Nonaktif'}</span></td><td class="admin-actions-cell"><button type="button" class="secondary-btn admin-small-btn" data-q-edit="${escapeHtml(q.question_id)}">Edit</button>${q.active ? `<button type="button" class="danger-btn admin-small-btn" data-q-delete="${escapeHtml(q.question_id)}">Hapus</button>` : ''}</td></tr>
-      `).join('') : `<tr><td colspan="5" class="admin-empty-cell">Belum ada soal di Sheet. Upload JSON untuk memindahkan bank soal.</td></tr>`;
+        <tr><td>${Number(q.package) || 0}</td><td>${Number(q.no_soal) || 0}</td><td class="admin-question-cell">${escapeHtml(q.question)}</td><td><strong>${escapeHtml(q.answer)}</strong></td><td><span class="admin-role ${q.active ? '' : 'admin-role-off'}">${q.active ? 'Aktif' : 'Nonaktif'}</span></td><td class="admin-actions-cell"><button type="button" class="secondary-btn admin-small-btn" data-q-edit="${escapeHtml(q.question_id)}">Edit</button>${q.active ? `<button type="button" class="danger-btn admin-small-btn" data-q-delete="${escapeHtml(q.question_id)}">Hapus</button>` : ''}</td></tr>
+      `).join('') : `<tr><td colspan="6" class="admin-empty-cell">Belum ada soal pada filter ini. Upload JSON untuk memindahkan bank soal.</td></tr>`;
       document.querySelectorAll('[data-q-edit]').forEach((button) => button.addEventListener('click', () => adminEditQuestion(button.dataset.qEdit)));
       document.querySelectorAll('[data-q-delete]').forEach((button) => button.addEventListener('click', () => adminDeleteQuestion(button.dataset.qDelete)));
     } catch (error) { toast(error.message, 'warning'); }
+  }
+
+  const ADMIN_QUESTION_BATCH_SIZE = 25;
+
+  function normalizeQuestionPayloads_(data, testType) {
+    const questions = [];
+    if (!data || !Array.isArray(data.paket)) {
+      throw new Error('JSON tidak memiliki array paket[].');
+    }
+
+    data.paket.forEach((pkg) => {
+      const packageNumber = Number(pkg?.id_paket);
+      if (!Number.isInteger(packageNumber) || packageNumber < 1) return;
+      if (!Array.isArray(pkg.soal)) return;
+
+      pkg.soal.forEach((q, index) => {
+        const noSoal = Number(q?.id) || index + 1;
+        questions.push({
+          question_id: `${testType}-${packageNumber}-${noSoal}`,
+          test_type: testType,
+          package: packageNumber,
+          no_soal: noSoal,
+          question: q?.question,
+          options: q?.options || {},
+          answer: q?.answer,
+          discussion: q?.discussion || ''
+        });
+      });
+    });
+
+    if (!questions.length) {
+      throw new Error('Tidak ada soal yang ditemukan di JSON.');
+    }
+
+    return questions;
+  }
+
+  async function adminSaveQuestionBatches(questions, label = 'Upload') {
+    let added = 0;
+    let updated = 0;
+
+    for (let start = 0; start < questions.length; start += ADMIN_QUESTION_BATCH_SIZE) {
+      const batch = questions.slice(start, start + ADMIN_QUESTION_BATCH_SIZE);
+      const end = Math.min(start + batch.length, questions.length);
+      const progress = $('adminQuestionProgress');
+      if (progress) progress.textContent = `${label}: ${end}/${questions.length} soal diproses…`;
+
+      const response = await apiChecked('adminSaveQuestions', {
+        token: state.session.token,
+        questions: batch
+      });
+
+      added += Number(response.added) || 0;
+      updated += Number(response.updated) || 0;
+    }
+
+    const progress = $('adminQuestionProgress');
+    if (progress) progress.textContent = `✅ ${label} selesai: ${added} ditambahkan, ${updated} diperbarui (${questions.length} total).`;
+
+    return { added, updated, total: questions.length };
   }
 
   async function adminUploadQuestionFile() {
     const input = $('adminQuestionFile');
     const file = input.files?.[0];
     if (!file) { toast('Pilih file JSON dulu.', 'warning'); return; }
+
+    const button = $('adminUploadQuestionBtn');
     try {
+      busy(button, 'Memproses…', true);
       const data = JSON.parse(await file.text());
       const testType = $('adminQuestionTest').value;
-      const questions = [];
-      if (!Array.isArray(data.paket)) throw new Error('JSON tidak memiliki array paket[].');
-      data.paket.forEach((pkg) => {
-        if (!Array.isArray(pkg.soal)) return;
-        pkg.soal.forEach((q, index) => {
-          questions.push({ question_id: `${testType}-${Number(pkg.id_paket) || 1}-${Number(q.id) || index + 1}`, test_type: testType, package: Number(pkg.id_paket) || 1, no_soal: Number(q.id) || index + 1, question: q.question, options: q.options, answer: q.answer, discussion: q.discussion });
-        });
-      });
-      if (!questions.length) throw new Error('Tidak ada soal yang ditemukan di JSON.');
-      const response = await apiChecked('adminSaveQuestions', { token: state.session.token, questions });
-      toast(response.message || 'Bank soal berhasil diimpor.', 'success', 4500);
+      const questions = normalizeQuestionPayloads_(data, testType);
+      const result = await adminSaveQuestionBatches(questions, file.name);
+
+      toast(`✅ ${file.name}: ${result.total} soal diproses.`, 'success', 5000);
       input.value = '';
       await adminLoadQuestions();
       await refreshAdminData();
-    } catch (error) { toast(`Upload JSON gagal: ${error.message}`, 'warning', 5000); }
+    } catch (error) {
+      const progress = $('adminQuestionProgress');
+      if (progress) progress.textContent = `❌ Upload gagal: ${error.message}`;
+      toast(`Upload JSON gagal: ${error.message}`, 'warning', 6000);
+    } finally {
+      busy(button, '', false);
+    }
   }
 
   async function adminMigrateAllQuestions() {
-    const button = $('adminMigrateAllBtn');
+    const button = $('adminMigrateAllQuestionsBtn');
     if (!button) return;
-    if (!window.confirm('Migrasikan semua bank soal JSON yang saat ini ada di GitHub ke QuestionBank? Data akan ditambah/diperbarui berdasarkan test + paket + nomor soal.')) return;
-    const entries = Object.entries(QUESTION_FILES);
+    if (!window.confirm('Migrasikan semua 6 bank soal JSON ke Google Sheets? Data dengan question_id yang sama akan diperbarui, bukan diduplikasi.')) return;
+
+    const files = Object.entries(QUESTION_FILES);
+    let total = 0;
+    let added = 0;
+    let updated = 0;
+
     try {
-      busy(button, 'Memigrasikan…', true);
-      let totalFiles = 0;
-      for (const [testType, filePath] of entries) {
+      busy(button, 'Migrasi berjalan…', true);
+
+      for (let index = 0; index < files.length; index += 1) {
+        const [testType, filePath] = files[index];
+        const progress = $('adminQuestionProgress');
+        if (progress) progress.textContent = `Memuat ${index + 1}/${files.length}: ${filePath}`;
+
         const response = await fetch(filePath, { cache: 'no-cache' });
-        if (!response.ok) throw new Error(`${filePath} gagal dimuat (${response.status}).`);
+        if (!response.ok) throw new Error(`Gagal memuat ${filePath}. HTTP ${response.status}.`);
+
         const data = await response.json();
-        if (!Array.isArray(data.paket)) throw new Error(`${filePath} tidak memiliki paket[].`);
-        const questions = [];
-        data.paket.forEach((pkg) => {
-          if (!Array.isArray(pkg.soal)) return;
-          pkg.soal.forEach((q, index) => {
-            questions.push({ question_id:`${testType}-${Number(pkg.id_paket)||1}-${Number(q.id)||index+1}`, test_type:testType, package:Number(pkg.id_paket)||1, no_soal:Number(q.id)||index+1, question:q.question, options:q.options, answer:q.answer, discussion:q.discussion });
-          });
-        });
-        if (questions.length) {
-          await apiChecked('adminSaveQuestions', { token:state.session.token, questions });
-          totalFiles += 1;
-        }
+        const questions = normalizeQuestionPayloads_(data, testType);
+        const result = await adminSaveQuestionBatches(questions, `${filePath}`);
+
+        total += result.total;
+        added += result.added;
+        updated += result.updated;
       }
-      toast(`Migrasi selesai: ${totalFiles} bank soal berhasil diproses.`, 'success', 5000);
+
+      const progress = $('adminQuestionProgress');
+      if (progress) progress.textContent = `✅ Migrasi semua selesai: ${total} soal diproses, ${added} ditambahkan, ${updated} diperbarui.`;
+      toast(`✅ Semua bank soal berhasil dimigrasikan (${total} soal).`, 'success', 6000);
       await adminLoadQuestions();
       await refreshAdminData();
     } catch (error) {
-      toast(`Migrasi semua JSON gagal: ${error.message}`, 'warning', 5000);
+      const progress = $('adminQuestionProgress');
+      if (progress) progress.textContent = `❌ Migrasi berhenti: ${error.message}`;
+      toast(`Migrasi semua JSON gagal: ${error.message}`, 'warning', 7000);
     } finally {
       busy(button, '', false);
     }
