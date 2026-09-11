@@ -1283,8 +1283,8 @@ const views = {
     const button = $('registerForm').querySelector('button[type="submit"]');
     error.textContent = '';
 
-    if (!/^[A-Za-z0-9_]{3,24}$/.test(username)) {
-      error.textContent = 'Username 3–24 karakter: huruf, angka, underscore.';
+    if (!/^[a-z0-9_]{3,24}$/.test(username)) {
+      error.textContent = 'Username 3–24 karakter dan hanya boleh huruf kecil, angka, serta underscore (_).';
       return;
     }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
@@ -1293,6 +1293,10 @@ const views = {
     }
     if (password.length < 8) {
       error.textContent = 'Password minimal 8 karakter.';
+      return;
+    }
+    if (!/[A-Za-z]/.test(password) || !/[0-9]/.test(password)) {
+      error.textContent = 'Password harus mengandung kombinasi huruf dan angka.';
       return;
     }
     if (password !== confirm) {
@@ -1422,6 +1426,10 @@ const views = {
 
     if (password.length < 8) {
       error.textContent = 'Password minimal 8 karakter.';
+      return;
+    }
+    if (!/[A-Za-z]/.test(password) || !/[0-9]/.test(password)) {
+      error.textContent = 'Password harus mengandung kombinasi huruf dan angka.';
       return;
     }
     if (password !== confirm) {
@@ -3268,10 +3276,41 @@ async function loadKuantitatifPackage(packageNumber) {
 
 
   // ============================================================
+  // PASSWORD VISIBILITY TOGGLE
+  // ============================================================
+
+  function bindPasswordToggles() {
+    document.querySelectorAll('[data-password-target]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const input = $(button.dataset.passwordTarget);
+        if (!input) return;
+
+        const visible = input.type === 'text';
+        input.type = visible ? 'password' : 'text';
+
+        button.setAttribute(
+          'aria-label',
+          visible ? 'Tampilkan password' : 'Sembunyikan password'
+        );
+        button.setAttribute(
+          'title',
+          visible ? 'Tampilkan password' : 'Sembunyikan password'
+        );
+        button.classList.toggle('is-visible', !visible);
+
+        const icon = button.querySelector('span');
+        if (icon) icon.textContent = visible ? '👁' : '🙈';
+      });
+    });
+  }
+
+  // ============================================================
   // EVENT BINDING
   // ============================================================
 
   function bind() {
+    bindPasswordToggles();
+
     $('landingLoginBtn').addEventListener('click', () => showAuth('login'));
     $('landingRegisterBtn').addEventListener('click', () => showAuth('register'));
     $('landingGuestBtn').addEventListener('click', () => { $('guestModal').hidden = false; });
