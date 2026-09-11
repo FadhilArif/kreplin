@@ -938,9 +938,11 @@ body[data-view=test] .app-shell {
   .test-catalog {
     grid-template-columns:1fr;
   }
+
   .score-grid {
     grid-template-columns:1fr 1fr;
   }
+
   .summary-grid {
     grid-template-columns:1fr 1fr;
   }
@@ -950,71 +952,128 @@ body[data-view=test] .app-shell {
   .app-shell {
     padding:10px;
   }
+
   .screen {
     min-height:calc(100dvh - 20px);
   }
+
   .landing-card,.auth-card,.instruction-card,.result-card,.history-card {
     border-radius:19px;
   }
+
   .landing-card {
     padding:28px 17px;
   }
+
   .landing-actions {
     grid-template-columns:1fr;
   }
+
   .dashboard-hero {
     align-items:stretch;
     flex-direction:column;
     padding:22px 17px;
   }
+
   .topbar {
     align-items:flex-start;
   }
+
   .topbar-brand {
     flex-direction:column;
     gap:8px;
   }
+
   .instruction-card,.result-card,.history-card {
     padding:22px 17px;
   }
+
   .instruction-grid {
     grid-template-columns:1fr;
   }
+
   .example-layout {
     gap:13px;
     padding:15px;
   }
+
   .example-column {
     font-size:1.5rem;
   }
+
   .result-hero {
     flex-direction:column;
   }
+
   .score-grid,.summary-grid {
     grid-template-columns:1fr;
   }
+
   .result-actions {
     flex-direction:column;
   }
+
   .result-actions .large-btn {
     min-width:0;
   }
+
   .modal-actions {
     grid-template-columns:1fr;
   }
+
   .test-shell {
     width:calc(100vw - 10px);
   }
+
   .test-header {
     padding:7px 40px;
   }
+
   .question-card {
     margin:6px 0;
   }
+
   .answer-btn {
     min-height:43px;
   }
+
   .digit-btn {
     min-height:40px;
+  }
+}
+
+/* ===== PRINT / PDF FALLBACK ===== */
+@media print {
+  body {
+    background: #fff !important;
+  }
+
+  body * {
+    visibility: hidden !important;
+  }
+
+  #resultView,
+  #resultView * {
+    visibility: visible !important;
+  }
+
+  #resultView {
+    position: absolute !important;
+    inset: 0 !important;
+    display: block !important;
+    min-height: auto !important;
+  }
+
+  #resultView .result-card {
+    width: 100% !important;
+    max-width: none !important;
+    border: 0 !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+  }
+
+  #resultView .result-actions,
+  #resultView .disclaimer {
+    display: none !important;
   }
 }
