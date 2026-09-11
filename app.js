@@ -210,6 +210,7 @@
     try {
       const session = JSON.parse(localStorage.getItem(CONFIG.SESSION_KEY) || 'null');
       if (!session?.token || !session?.user_id || !session?.username) return null;
+      if (!session.role) session.role = 'user';
       return session;
     } catch {
       return null;
@@ -1022,23 +1023,23 @@
 
   function renderDashboardSummary() {
     const count = state.history.length;
-    $('historyCount').textContent = String(count);
+    if ($('historyCount')) $('historyCount').textContent = String(count);
 
     if (!count) {
-      $('latestDate').textContent = 'Belum ada tes';
-      $('dashSpeed').textContent = '—';
-      $('dashAccuracy').textContent = '—';
-      $('dashConsistency').textContent = '—';
-      $('dashEndurance').textContent = '—';
+      if ($('latestDate')) $('latestDate').textContent = 'Belum ada tes';
+      if ($('dashSpeed')) $('dashSpeed').textContent = '—';
+      if ($('dashAccuracy')) $('dashAccuracy').textContent = '—';
+      if ($('dashConsistency')) $('dashConsistency').textContent = '—';
+      if ($('dashEndurance')) $('dashEndurance').textContent = '—';
       return;
     }
 
     const latest = state.history[0];
-    $('latestDate').textContent = formatDate(latest.tanggal);
-    $('dashSpeed').textContent = `${Number(latest.speed) || 0}%`;
-    $('dashAccuracy').textContent = `${Number(latest.accuracy) || 0}%`;
-    $('dashConsistency').textContent = `${Number(latest.consistency) || 0}%`;
-    $('dashEndurance').textContent = `${Number(latest.endurance) || 0}%`;
+    if ($('latestDate')) $('latestDate').textContent = formatDate(latest.tanggal);
+    if ($('dashSpeed')) $('dashSpeed').textContent = `${Number(latest.speed) || 0}%`;
+    if ($('dashAccuracy')) $('dashAccuracy').textContent = `${Number(latest.accuracy) || 0}%`;
+    if ($('dashConsistency')) $('dashConsistency').textContent = `${Number(latest.consistency) || 0}%`;
+    if ($('dashEndurance')) $('dashEndurance').textContent = `${Number(latest.endurance) || 0}%`;
   }
 
   function formatDate(value) {
@@ -1205,6 +1206,11 @@
   }
 
   async function goDashboard(message = '') {
+    if (isAdmin()) {
+      await openAdminDashboard();
+      return;
+    }
+
     if (state.isGuest) {
       renderCatalog();
       showView('dashboard');
@@ -1476,6 +1482,27 @@
   });
 
   async function loadQuestionPackage(testId, packageNumber) {
+    // Akun peserta terdaftar memprioritaskan bank soal di Google Sheets.
+    // Kalau bank belum dimigrasikan, fallback tetap menggunakan JSON GitHub lama.
+    if (state.session?.token && !state.isGuest) {
+      try {
+        const backend = await apiChecked('getQuestionPackage', {
+          test_type: testId,
+          package: packageNumber,
+        });
+        if (Array.isArray(backend.questions) && backend.questions.length) {
+          return backend.questions.map((item, index) => {
+            const optionEntries = Object.entries(item.options || {});
+            const correctIndex = optionEntries.findIndex(([letter]) => String(letter).toUpperCase() === String(item.answer || '').toUpperCase());
+            if (correctIndex < 0) throw new Error(`Jawaban soal nomor ${item.id ?? index + 1} tidak valid di QuestionBank.`);
+            return { id:item.id ?? index + 1, text:String(item.question ?? ''), options:optionEntries.map(([,value])=>String(value)), correct:correctIndex, discussion:String(item.discussion ?? '') };
+          });
+        }
+      } catch (error) {
+        console.warn('Bank soal Sheet belum siap, fallback ke JSON:', error);
+      }
+    }
+
     const filePath = QUESTION_FILES[testId];
 
     if (!filePath) {
@@ -2700,6 +2727,417 @@ async function loadKuantitatifPackage(packageNumber) {
     toast('Tes dibatalkan. Progress tidak disimpan.', 'info');
   }
 
+
+/* ============================================================
+   ADMIN PANEL
+   ============================================================ */
+
+  state.admin = {
+    stats: { users: 0, admins: 0, tests: 0, avg_score: 0 },
+    users: [],
+    results: [],
+    labels: [],
+    tab: 'overview'
+  };
+
+  const ADMIN_TEST_OPTIONS = Object.entries(TESTS)
+    .filter(([id, test]) => test.kind === 'mcq')
+    .map(([id, test]) => ({ id, name: test.name }));
+
+  function isAdmin() {
+    return state.session?.role === 'admin';
+  }
+
+  function adminRequireAccess() {
+    if (!isAdmin()) {
+      toast('Akses admin ditolak.', 'warning');
+      return false;
+    }
+    return true;
+  }
+
+  async function openAdminDashboard(tab = state.admin?.tab || 'overview') {
+    if (!adminRequireAccess()) return;
+    state.admin.tab = tab;
+    try {
+      await refreshAdminData();
+      renderAdmin();
+      showView('admin');
+    } catch (error) {
+      toast(`Dashboard admin gagal dimuat: ${error.message}`, 'warning', 5000);
+    }
+  }
+
+  async function refreshAdminData() {
+    const response = await apiChecked('adminDashboard', {
+      token: state.session.token,
+    });
+
+    state.admin.stats = response.stats || state.admin.stats;
+    state.admin.users = Array.isArray(response.users) ? response.users : [];
+    state.admin.results = Array.isArray(response.results) ? response.results : [];
+    state.admin.labels = Array.isArray(response.labels) ? response.labels : [];
+    return response;
+  }
+
+  function adminTestName(testType) {
+    return TESTS[testType]?.name || testType || '—';
+  }
+
+  function renderAdmin() {
+    if (!$('adminView')) return;
+
+    if ($('adminWelcomeName')) $('adminWelcomeName').textContent = state.session?.username || '—';
+
+    $('adminUsersStat').textContent = String(state.admin.stats.users || 0);
+    $('adminTestsStat').textContent = String(state.admin.stats.tests || 0);
+    $('adminAverageStat').textContent = `${Number(state.admin.stats.avg_score) || 0}%`;
+    $('adminAdminsStat').textContent = String(state.admin.stats.admins || 0);
+
+    document.querySelectorAll('[data-admin-tab]').forEach((button) => {
+      button.classList.toggle('active', button.dataset.adminTab === state.admin.tab);
+    });
+
+    if (state.admin.tab === 'users') renderAdminUsers();
+    else if (state.admin.tab === 'results') renderAdminResults();
+    else if (state.admin.tab === 'questions') renderAdminQuestions();
+    else if (state.admin.tab === 'labels') renderAdminLabels();
+    else renderAdminOverview();
+  }
+
+  function renderAdminOverview() {
+    const results = state.admin.results.slice(0, 10);
+    $('adminPanel').innerHTML = `
+      <div class="admin-panel-head">
+        <div><div class="eyebrow">OVERVIEW</div><h2>Ringkasan sistem</h2></div>
+        <button type="button" class="secondary-btn" id="adminRefreshBtn">↻ Refresh</button>
+      </div>
+      <div class="admin-grid-two">
+        <div class="admin-card card">
+          <h3>Aktivitas terbaru</h3>
+          <p class="muted">10 hasil tes terbaru dari seluruh peserta.</p>
+          <div class="table-wrap admin-table-wrap">
+            <table><thead><tr><th>Peserta</th><th>Tes</th><th>Skor</th><th>Label</th><th>Tanggal</th></tr></thead>
+            <tbody>${results.length ? results.map((item) => `
+              <tr>
+                <td>${escapeHtml(item.username)}</td>
+                <td>${escapeHtml(adminTestName(item.test_type))}</td>
+                <td><strong>${Number(item.score) || 0}%</strong></td>
+                <td><span class="admin-badge">${escapeHtml(item.label || 'Belum ada label')}</span></td>
+                <td>${escapeHtml(formatDate(item.tanggal))}</td>
+              </tr>`).join('') : `<tr><td colspan="5" class="admin-empty-cell">Belum ada hasil tes.</td></tr>`}</tbody></table>
+          </div>
+        </div>
+        <div class="admin-card card">
+          <h3>Akses cepat</h3>
+          <p class="muted">Kelola data tanpa membuka Google Sheets secara manual.</p>
+          <div class="admin-quick-grid">
+            <button type="button" class="secondary-btn" data-admin-tab="users">👥 Kelola Peserta</button>
+            <button type="button" class="secondary-btn" data-admin-tab="results">📊 Lihat Nilai</button>
+            <button type="button" class="secondary-btn" data-admin-tab="questions">🧩 Bank Soal</button>
+            <button type="button" class="secondary-btn" data-admin-tab="labels">🏷️ Label Nilai</button>
+          </div>
+          <div class="warning-box"><strong>Catatan:</strong> perubahan bank soal dan label langsung tersimpan ke Google Sheets.</div>
+        </div>
+      </div>
+    `;
+
+    $('adminRefreshBtn').addEventListener('click', async () => {
+      busy($('adminRefreshBtn'), 'Memuat…', true);
+      try { await refreshAdminData(); renderAdmin(); } catch (e) { toast(e.message, 'warning'); }
+      finally { busy($('adminRefreshBtn'), '', false); }
+    });
+    bindAdminTabButtons();
+  }
+
+  function renderAdminUsers() {
+    $('adminPanel').innerHTML = `
+      <div class="admin-panel-head">
+        <div><div class="eyebrow">PESERTA</div><h2>Manajemen akun</h2><p class="muted">Tambah, reset sandi, atau hapus akun peserta.</p></div>
+      </div>
+      <div class="admin-card card">
+        <form id="adminCreateUserForm" class="admin-form-grid">
+          <label>Username<input id="adminNewUsername" maxlength="24" required></label>
+          <label>Email<input id="adminNewEmail" type="email" placeholder="opsional"></label>
+          <label>Password awal<input id="adminNewPassword" type="password" minlength="8" required></label>
+          <button class="primary-btn" type="submit">+ Tambah Akun</button>
+        </form>
+      </div>
+      <div class="admin-card card">
+        <div class="admin-table-title"><h3>Daftar akun</h3><button type="button" class="secondary-btn" id="adminUsersRefresh">↻ Refresh</button></div>
+        <div class="table-wrap admin-table-wrap"><table><thead><tr><th>Username</th><th>Email</th><th>Role</th><th>Dibuat</th><th>Tes</th><th>Aksi</th></tr></thead><tbody id="adminUsersBody"></tbody></table></div>
+      </div>
+    `;
+
+    const body = $('adminUsersBody');
+    body.innerHTML = state.admin.users.map((user) => `
+      <tr>
+        <td><strong>${escapeHtml(user.username)}</strong><small class="admin-sub">${escapeHtml(user.user_id)}</small></td>
+        <td>${escapeHtml(user.email || '—')}</td>
+        <td><span class="admin-role ${user.role === 'admin' ? 'admin-role-admin' : ''}">${escapeHtml(user.role)}</span></td>
+        <td>${escapeHtml(formatDate(user.created_at))}</td>
+        <td>${Number(user.test_count) || 0}</td>
+        <td class="admin-actions-cell">
+          ${user.role === 'user' ? `<button type="button" class="secondary-btn admin-small-btn" data-user-reset="${escapeHtml(user.user_id)}">Reset Sandi</button><button type="button" class="danger-btn admin-small-btn" data-user-delete="${escapeHtml(user.user_id)}">Hapus</button>` : '<span class="admin-muted">Dilindungi</span>'}
+        </td>
+      </tr>
+    `).join('') || `<tr><td colspan="6" class="admin-empty-cell">Belum ada akun.</td></tr>`;
+
+    $('adminCreateUserForm').addEventListener('submit', adminCreateUserSubmit);
+    $('adminUsersRefresh').addEventListener('click', async () => { await refreshAdminUsers(); });
+    document.querySelectorAll('[data-user-reset]').forEach((button) => button.addEventListener('click', () => adminResetUser(button.dataset.userReset)));
+    document.querySelectorAll('[data-user-delete]').forEach((button) => button.addEventListener('click', () => adminDeleteUser(button.dataset.userDelete)));
+  }
+
+  async function refreshAdminUsers() {
+    try {
+      const response = await apiChecked('adminGetUsers', { token: state.session.token });
+      state.admin.users = response.users || [];
+      renderAdminUsers();
+    } catch (error) { toast(error.message, 'warning'); }
+  }
+
+  async function adminCreateUserSubmit(event) {
+    event.preventDefault();
+    const button = event.currentTarget.querySelector('button[type="submit"]');
+    const user = { username: $('adminNewUsername').value.trim(), email: $('adminNewEmail').value.trim(), password: $('adminNewPassword').value };
+    try {
+      busy(button, 'Menyimpan…', true);
+      const response = await apiChecked('adminCreateUser', { token: state.session.token, user });
+      toast(response.message || 'Akun dibuat.', 'success');
+      event.currentTarget.reset();
+      await refreshAdminUsers();
+    } catch (error) { toast(error.message, 'warning'); }
+    finally { busy(button, '', false); }
+  }
+
+  async function adminResetUser(userId) {
+    const user = state.admin.users.find((item) => item.user_id === userId);
+    if (!user) return;
+    const choice = window.prompt(`Reset sandi untuk ${user.username}.\nKetik MANUAL untuk menentukan sandi sendiri, atau kosongkan untuk password otomatis.`, '');
+    if (choice === null) return;
+    const mode = choice.trim().toUpperCase() === 'MANUAL' ? 'manual' : 'generated';
+    let password = '';
+    if (mode === 'manual') {
+      password = window.prompt('Masukkan password baru (minimal 8 karakter):', '');
+      if (password === null) return;
+    }
+    try {
+      const response = await apiChecked('adminResetUserPassword', { token: state.session.token, user_id: userId, mode, password });
+      window.alert(`Password ${response.username || user.username} berhasil direset.\n\nPassword baru: ${response.temporary_password}`);
+    } catch (error) { toast(error.message, 'warning'); }
+  }
+
+  async function adminDeleteUser(userId) {
+    const user = state.admin.users.find((item) => item.user_id === userId);
+    if (!user) return;
+    if (!window.confirm(`Hapus akun ${user.username}?\n\nHistori dan detail tes akun ini juga akan dihapus.`)) return;
+    try {
+      const response = await apiChecked('adminDeleteUser', { token: state.session.token, user_id: userId });
+      toast(response.message || 'Akun dihapus.', 'success');
+      await refreshAdminUsers();
+      await refreshAdminData();
+    } catch (error) { toast(error.message, 'warning'); }
+  }
+
+  function renderAdminResults() {
+    const resultRows = state.admin.results;
+    $('adminPanel').innerHTML = `
+      <div class="admin-panel-head"><div><div class="eyebrow">HASIL TES</div><h2>Semua hasil peserta</h2><p class="muted">Filter berdasarkan username, tes, dan rentang skor.</p></div><button type="button" class="secondary-btn" id="adminResultsRefresh">↻ Refresh</button></div>
+      <div class="admin-card card">
+        <div class="admin-filter-grid">
+          <label>Username<input id="adminFilterUsername" placeholder="cari username"></label>
+          <label>Tes<select id="adminFilterTest"><option value="">Semua tes</option>${Object.entries(TESTS).map(([id, test]) => `<option value="${id}">${escapeHtml(test.name)}</option>`).join('')}</select></label>
+          <label>Skor minimum<input id="adminFilterMin" type="number" min="0" max="100"></label>
+          <label>Skor maksimum<input id="adminFilterMax" type="number" min="0" max="100"></label>
+          <button type="button" class="primary-btn" id="adminApplyFilters">Terapkan Filter</button>
+        </div>
+      </div>
+      <div class="admin-card card"><div class="table-wrap admin-table-wrap"><table><thead><tr><th>Tanggal</th><th>Peserta</th><th>Tes</th><th>Paket</th><th>Skor</th><th>Label</th><th>Benar</th><th>Salah</th><th>Kecepatan</th><th>Ketelitian</th></tr></thead><tbody id="adminResultsBody"></tbody></table></div></div>
+    `;
+    renderAdminResultsBody(resultRows);
+    $('adminApplyFilters').addEventListener('click', adminApplyResultFilters);
+    $('adminResultsRefresh').addEventListener('click', async () => { await refreshAdminData(); renderAdminResults(); });
+  }
+
+  function renderAdminResultsBody(rows) {
+    const body = $('adminResultsBody');
+    if (!body) return;
+    body.innerHTML = rows.length ? rows.map((item) => `
+      <tr><td>${escapeHtml(formatDate(item.tanggal))}</td><td><strong>${escapeHtml(item.username)}</strong><small class="admin-sub">${escapeHtml(item.email || '')}</small></td><td>${escapeHtml(adminTestName(item.test_type))}</td><td>${Number(item.package) || 1}</td><td><strong>${Number(item.score) || 0}%</strong></td><td><span class="admin-badge">${escapeHtml(item.label || 'Belum ada label')}</span></td><td>${Number(item.correct) || 0}</td><td>${Number(item.wrong) || 0}</td><td>${Number(item.speed) || 0}%</td><td>${Number(item.accuracy) || 0}%</td></tr>
+    `).join('') : `<tr><td colspan="10" class="admin-empty-cell">Tidak ada data sesuai filter.</td></tr>`;
+  }
+
+  async function adminApplyResultFilters() {
+    try {
+      const response = await apiChecked('adminGetResults', { token: state.session.token, filters: { username: $('adminFilterUsername').value, test_type: $('adminFilterTest').value, min_score: $('adminFilterMin').value, max_score: $('adminFilterMax').value } });
+      state.admin.results = response.results || [];
+      renderAdminResultsBody(state.admin.results);
+    } catch (error) { toast(error.message, 'warning'); }
+  }
+
+  function renderAdminQuestions() {
+    $('adminPanel').innerHTML = `
+      <div class="admin-panel-head"><div><div class="eyebrow">BANK SOAL</div><h2>Kelola soal MCQ</h2><p class="muted">Upload JSON lama untuk memindahkan soal ke Sheet, lalu edit atau nonaktifkan langsung dari sini.</p></div></div>
+      <div class="admin-card card">
+        <div class="admin-filter-grid admin-question-tools">
+          <label>Tes<select id="adminQuestionTest">${ADMIN_TEST_OPTIONS.map((item) => `<option value="${item.id}">${escapeHtml(item.name)}</option>`).join('')}</select></label>
+          <label>Paket<select id="adminQuestionPackage"><option value="1">Paket 1</option><option value="2">Paket 2</option><option value="3">Paket 3</option></select></label>
+          <label>Upload JSON<input id="adminQuestionFile" type="file" accept="application/json,.json"></label>
+          <button type="button" class="primary-btn" id="adminUploadQuestionBtn">Upload / Migrasikan</button>
+          <button type="button" class="secondary-btn" id="adminMigrateAllBtn">⚡ Migrasikan Semua JSON</button>
+          <button type="button" class="secondary-btn" id="adminLoadQuestionsBtn">Muat Soal</button>
+        </div>
+        <div class="warning-box"><strong>Format:</strong> file JSON mengikuti struktur <code>kategori → paket[] → soal[]</code> yang sekarang dipakai website. Upload satu file tes setiap kali.</div>
+      </div>
+      <div class="admin-card card"><div class="admin-table-title"><h3>Soal tersimpan</h3><span id="adminQuestionCount" class="admin-muted">0 soal</span></div><div class="table-wrap admin-table-wrap"><table><thead><tr><th>No</th><th>Pertanyaan</th><th>Jawaban</th><th>Status</th><th>Aksi</th></tr></thead><tbody id="adminQuestionsBody"></tbody></table></div></div>
+    `;
+    $('adminUploadQuestionBtn').addEventListener('click', adminUploadQuestionFile);
+    $('adminMigrateAllBtn').addEventListener('click', adminMigrateAllQuestions);
+    $('adminLoadQuestionsBtn').addEventListener('click', adminLoadQuestions);
+    $('adminQuestionTest').addEventListener('change', adminLoadQuestions);
+    $('adminQuestionPackage').addEventListener('change', adminLoadQuestions);
+    adminLoadQuestions();
+  }
+
+  let adminQuestionsCache = [];
+
+  async function adminLoadQuestions() {
+    try {
+      const response = await apiChecked('adminGetQuestions', { token: state.session.token, test_type: $('adminQuestionTest').value, package: Number($('adminQuestionPackage').value), include_inactive: true });
+      adminQuestionsCache = response.questions || [];
+      $('adminQuestionCount').textContent = `${adminQuestionsCache.length} soal`;
+      $('adminQuestionsBody').innerHTML = adminQuestionsCache.length ? adminQuestionsCache.map((q) => `
+        <tr><td>${Number(q.no_soal) || 0}</td><td class="admin-question-cell">${escapeHtml(q.question)}</td><td><strong>${escapeHtml(q.answer)}</strong></td><td><span class="admin-role ${q.active ? '' : 'admin-role-off'}">${q.active ? 'Aktif' : 'Nonaktif'}</span></td><td class="admin-actions-cell"><button type="button" class="secondary-btn admin-small-btn" data-q-edit="${escapeHtml(q.question_id)}">Edit</button>${q.active ? `<button type="button" class="danger-btn admin-small-btn" data-q-delete="${escapeHtml(q.question_id)}">Hapus</button>` : ''}</td></tr>
+      `).join('') : `<tr><td colspan="5" class="admin-empty-cell">Belum ada soal di Sheet. Upload JSON untuk memindahkan bank soal.</td></tr>`;
+      document.querySelectorAll('[data-q-edit]').forEach((button) => button.addEventListener('click', () => adminEditQuestion(button.dataset.qEdit)));
+      document.querySelectorAll('[data-q-delete]').forEach((button) => button.addEventListener('click', () => adminDeleteQuestion(button.dataset.qDelete)));
+    } catch (error) { toast(error.message, 'warning'); }
+  }
+
+  async function adminUploadQuestionFile() {
+    const input = $('adminQuestionFile');
+    const file = input.files?.[0];
+    if (!file) { toast('Pilih file JSON dulu.', 'warning'); return; }
+    try {
+      const data = JSON.parse(await file.text());
+      const testType = $('adminQuestionTest').value;
+      const questions = [];
+      if (!Array.isArray(data.paket)) throw new Error('JSON tidak memiliki array paket[].');
+      data.paket.forEach((pkg) => {
+        if (!Array.isArray(pkg.soal)) return;
+        pkg.soal.forEach((q, index) => {
+          questions.push({ question_id: `${testType}-${Number(pkg.id_paket) || 1}-${Number(q.id) || index + 1}`, test_type: testType, package: Number(pkg.id_paket) || 1, no_soal: Number(q.id) || index + 1, question: q.question, options: q.options, answer: q.answer, discussion: q.discussion });
+        });
+      });
+      if (!questions.length) throw new Error('Tidak ada soal yang ditemukan di JSON.');
+      const response = await apiChecked('adminSaveQuestions', { token: state.session.token, questions });
+      toast(response.message || 'Bank soal berhasil diimpor.', 'success', 4500);
+      input.value = '';
+      await adminLoadQuestions();
+      await refreshAdminData();
+    } catch (error) { toast(`Upload JSON gagal: ${error.message}`, 'warning', 5000); }
+  }
+
+  async function adminMigrateAllQuestions() {
+    const button = $('adminMigrateAllBtn');
+    if (!button) return;
+    if (!window.confirm('Migrasikan semua bank soal JSON yang saat ini ada di GitHub ke QuestionBank? Data akan ditambah/diperbarui berdasarkan test + paket + nomor soal.')) return;
+    const entries = Object.entries(QUESTION_FILES);
+    try {
+      busy(button, 'Memigrasikan…', true);
+      let totalFiles = 0;
+      for (const [testType, filePath] of entries) {
+        const response = await fetch(filePath, { cache: 'no-cache' });
+        if (!response.ok) throw new Error(`${filePath} gagal dimuat (${response.status}).`);
+        const data = await response.json();
+        if (!Array.isArray(data.paket)) throw new Error(`${filePath} tidak memiliki paket[].`);
+        const questions = [];
+        data.paket.forEach((pkg) => {
+          if (!Array.isArray(pkg.soal)) return;
+          pkg.soal.forEach((q, index) => {
+            questions.push({ question_id:`${testType}-${Number(pkg.id_paket)||1}-${Number(q.id)||index+1}`, test_type:testType, package:Number(pkg.id_paket)||1, no_soal:Number(q.id)||index+1, question:q.question, options:q.options, answer:q.answer, discussion:q.discussion });
+          });
+        });
+        if (questions.length) {
+          await apiChecked('adminSaveQuestions', { token:state.session.token, questions });
+          totalFiles += 1;
+        }
+      }
+      toast(`Migrasi selesai: ${totalFiles} bank soal berhasil diproses.`, 'success', 5000);
+      await adminLoadQuestions();
+      await refreshAdminData();
+    } catch (error) {
+      toast(`Migrasi semua JSON gagal: ${error.message}`, 'warning', 5000);
+    } finally {
+      busy(button, '', false);
+    }
+  }
+
+  async function adminEditQuestion(questionId) {
+    const question = adminQuestionsCache.find((item) => item.question_id === questionId);
+    if (!question) return;
+    const raw = window.prompt('Edit soal dalam JSON. Setelah selesai, tekan OK.\n\nFormat contoh: {"question":"...","options":{"A":"...","B":"...","C":"...","D":"...","E":"..."},"answer":"A","discussion":"..."}', JSON.stringify({ question: question.question, options: { A:question.option_a, B:question.option_b, C:question.option_c, D:question.option_d, E:question.option_e }, answer:question.answer, discussion:question.discussion }, null, 2));
+    if (raw === null) return;
+    try {
+      const edited = JSON.parse(raw);
+      const payload = { question_id: question.question_id, test_type: question.test_type, package: question.package, no_soal: question.no_soal, question: edited.question, options: edited.options, answer: edited.answer, discussion: edited.discussion };
+      await apiChecked('adminSaveQuestions', { token: state.session.token, questions: [payload] });
+      toast('Soal berhasil diperbarui.', 'success');
+      await adminLoadQuestions();
+    } catch (error) { toast(`Soal tidak valid: ${error.message}`, 'warning', 4500); }
+  }
+
+  async function adminDeleteQuestion(questionId) {
+    const question = adminQuestionsCache.find((item) => item.question_id === questionId);
+    if (!question || !window.confirm(`Nonaktifkan soal nomor ${question.no_soal}? Soal tidak akan dipakai peserta, tetapi datanya tetap tersimpan.`)) return;
+    try { const response = await apiChecked('adminDeleteQuestion', { token: state.session.token, question_id: questionId }); toast(response.message || 'Soal dinonaktifkan.', 'success'); await adminLoadQuestions(); }
+    catch (error) { toast(error.message, 'warning'); }
+  }
+
+  function renderAdminLabels() {
+    const selected = state.admin.labelTest || 'kuantitatif';
+    const labels = state.admin.labels.filter((item) => item.test_type === selected);
+    $('adminPanel').innerHTML = `
+      <div class="admin-panel-head"><div><div class="eyebrow">PENILAIAN</div><h2>Label kelulusan multi-tingkat</h2><p class="muted">Atur batas nilai masing-masing tes. Rentang 0–100.</p></div></div>
+      <div class="admin-card card">
+        <div class="admin-filter-grid"><label>Tes<select id="adminLabelTest">${Object.entries(TESTS).map(([id,test]) => `<option value="${id}" ${id===selected?'selected':''}>${escapeHtml(test.name)}</option>`).join('')}</select></label><div class="admin-label-help">Contoh: 90–100 = Sangat Baik, 80–89 = Baik.</div><button type="button" class="secondary-btn" id="adminAddLabel">+ Tambah Label</button><button type="button" class="primary-btn" id="adminSaveLabels">Simpan Label</button></div>
+      </div>
+      <div class="admin-card card"><div id="adminLabelsList" class="admin-label-list"></div></div>
+    `;
+    const list = $('adminLabelsList');
+    list.innerHTML = labels.map((item, index) => `
+      <div class="admin-label-row" data-label-index="${index}"><input class="admin-label-name" value="${escapeHtml(item.label)}" placeholder="Nama label"><input class="admin-label-min" type="number" min="0" max="100" value="${Number(item.min_score)}"><span>hingga</span><input class="admin-label-max" type="number" min="0" max="100" value="${Number(item.max_score)}"><button type="button" class="danger-btn admin-small-btn admin-remove-label">Hapus</button></div>
+    `).join('');
+    $('adminLabelTest').addEventListener('change', async () => { state.admin.labelTest = $('adminLabelTest').value; await loadAdminLabelsForSelected(); });
+    $('adminAddLabel').addEventListener('click', () => {
+      const row = document.createElement('div'); row.className='admin-label-row'; row.innerHTML='<input class="admin-label-name" value="Label Baru"><input class="admin-label-min" type="number" min="0" max="100" value="0"><span>hingga</span><input class="admin-label-max" type="number" min="0" max="100" value="100"><button type="button" class="danger-btn admin-small-btn admin-remove-label">Hapus</button>'; list.appendChild(row); bindLabelRemoveButtons();
+    });
+    $('adminSaveLabels').addEventListener('click', adminSaveLabels);
+    bindLabelRemoveButtons();
+  }
+
+  function bindLabelRemoveButtons() { document.querySelectorAll('.admin-remove-label').forEach((button) => button.onclick = () => button.closest('.admin-label-row')?.remove()); }
+
+  async function loadAdminLabelsForSelected() {
+    try { const response = await apiChecked('adminGetScoreLabels', { token:state.session.token, test_type:state.admin.labelTest }); state.admin.labels = [...state.admin.labels.filter((x)=>x.test_type!==state.admin.labelTest), ...(response.labels||[])]; renderAdminLabels(); }
+    catch(error){toast(error.message,'warning');}
+  }
+
+  async function adminSaveLabels() {
+    const type = $('adminLabelTest').value;
+    const labels = Array.from(document.querySelectorAll('.admin-label-row')).map((row, index) => ({ label:row.querySelector('.admin-label-name').value.trim(), min_score:Number(row.querySelector('.admin-label-min').value), max_score:Number(row.querySelector('.admin-label-max').value), urutan:index+1 }));
+    try { const response = await apiChecked('adminSaveScoreLabels', { token:state.session.token, test_type:type, labels }); toast(response.message||'Label tersimpan.','success'); const refreshed=await apiChecked('adminGetScoreLabels',{token:state.session.token,test_type:type}); state.admin.labels=[...state.admin.labels.filter((x)=>x.test_type!==type),...(refreshed.labels||[])]; renderAdminLabels(); }
+    catch(error){toast(error.message,'warning');}
+  }
+
+  function bindAdminTabButtons() {
+    document.querySelectorAll('[data-admin-tab]').forEach((button) => {
+      button.addEventListener('click', async () => { state.admin.tab = button.dataset.adminTab; if (state.admin.tab === 'labels' && !state.admin.labelTest) state.admin.labelTest='kuantitatif'; renderAdmin(); });
+    });
+  }
+
+
   // ============================================================
   // EVENT BINDING
   // ============================================================
@@ -2773,6 +3211,7 @@ async function loadKuantitatifPackage(packageNumber) {
 
     $('backDashboardBtn').addEventListener('click', () => goDashboard());
     $('logoutBtn').addEventListener('click', logout);
+    $('adminLogoutBtn')?.addEventListener('click', logout);
 
     $('loginForm').addEventListener('submit', (event) => {
       event.preventDefault();
@@ -2824,6 +3263,16 @@ async function loadKuantitatifPackage(packageNumber) {
 
     if (state.session) {
       $('welcomeName').textContent = state.session.username;
+
+      if (isAdmin()) {
+        try {
+          await openAdminDashboard('overview');
+        } catch (error) {
+          toast(`Dashboard admin belum dapat dibuka: ${error.message}`, 'warning', 4500);
+        }
+        return;
+      }
+
       showView('dashboard');
 
       try {
