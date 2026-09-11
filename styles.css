@@ -833,7 +833,7 @@ body[data-view=test] .app-shell {
 .table-wrap table {
   width:100%;
   border-collapse:collapse;
-  min-width:900px;
+  min-width:1010px;
 }
 
 .table-wrap th,.table-wrap td {
@@ -841,6 +841,20 @@ body[data-view=test] .app-shell {
   border-bottom:1px solid var(--line);
   text-align:left;
   font-size:.7rem;
+}
+
+
+
+.history-action-cell {
+  white-space:nowrap;
+  text-align:center;
+}
+
+.history-pdf-btn {
+  padding:7px 10px;
+  min-width:86px;
+  font-size:.62rem;
+  white-space:nowrap;
 }
 
 .table-wrap th {
