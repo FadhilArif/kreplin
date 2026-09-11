@@ -832,10 +832,21 @@
         417,
         8
       );
-      buildKraepelinPdfChart(
-        lines,
-        result
-      );
+
+      if (Array.isArray(result.chart) && result.chart.length) {
+        buildKraepelinPdfChart(
+          lines,
+          result
+        );
+      } else {
+        drawPdfText(
+          lines,
+          'Data grafik detail tidak tersedia pada histori.',
+          52,
+          330,
+          9
+        );
+      }
     } else {
       drawPdfText(
         lines,
@@ -844,10 +855,21 @@
         417,
         8
       );
-      buildMcqPdfChart(
-        lines,
-        result
-      );
+
+      if (Array.isArray(result.chart) && result.chart.length) {
+        buildMcqPdfChart(
+          lines,
+          result
+        );
+      } else {
+        drawPdfText(
+          lines,
+          'Data waktu per soal tidak disimpan di Google Sheets, jadi grafik detail tidak tersedia pada histori.',
+          52,
+          330,
+          9
+        );
+      }
     }
 
     lines.push('0.10 0.19 0.30 rg');
@@ -1034,6 +1056,23 @@
     $('emptyHistory').hidden = history.length > 0;
     $('historyTable').hidden = history.length === 0;
 
+    // Tambahkan kolom aksi secara dinamis supaya tidak perlu mengubah HTML.
+    const headerRow = $('historyTable')?.querySelector('thead tr');
+    if (headerRow) {
+      headerRow.innerHTML = `
+        <th>#</th>
+        <th>Tanggal</th>
+        <th>Tes</th>
+        <th>Paket</th>
+        <th>Skor</th>
+        <th>Kecepatan</th>
+        <th>Ketelitian</th>
+        <th>Konsistensi</th>
+        <th>Ketahanan</th>
+        <th>Aksi</th>
+      `;
+    }
+
     history.forEach((item, index) => {
       const row = document.createElement('tr');
       row.innerHTML = `
@@ -1046,9 +1085,112 @@
         <td>${Number(item.accuracy) || 0}%</td>
         <td>${Number(item.consistency) || 0}%</td>
         <td>${Number(item.endurance) || 0}%</td>
+        <td class="history-action-cell"></td>
       `;
+
+      const actionCell = row.querySelector('.history-action-cell');
+      const pdfButton = document.createElement('button');
+      pdfButton.type = 'button';
+      pdfButton.className = 'secondary-btn history-pdf-btn';
+      pdfButton.textContent = 'Cetak PDF';
+      pdfButton.title = 'Cetak hasil PDF';
+      pdfButton.addEventListener('click', () => {
+        downloadHistoryPdf(item, pdfButton);
+      });
+
+      actionCell.appendChild(pdfButton);
       body.appendChild(row);
     });
+  }
+
+  function historyItemToResult(item) {
+    const normalizedType = item?.test_type || 'kuantitatif';
+
+    return {
+      type: normalizedType,
+      package: Number(item?.package) || 1,
+      answered: Number(item?.answered) || (Number(item?.correct) || 0) + (Number(item?.wrong) || 0),
+      correct: Number(item?.correct) || 0,
+      wrong: Number(item?.wrong) || 0,
+      total: Number(item?.total) || CONFIG.MCQ_QUESTIONS,
+      score: Number(item?.score) || 0,
+      speed: Number(item?.speed) || 0,
+      accuracy: Number(item?.accuracy) || 0,
+      consistency: Number(item?.consistency) || 0,
+      endurance: Number(item?.endurance) || 0,
+      chart: Array.isArray(item?.chart) ? item.chart : [],
+      tanggal: item?.tanggal || new Date().toISOString(),
+    };
+  }
+
+  async function downloadHistoryPdf(item, button) {
+    if (!item) return;
+
+    busy(button, 'PDF…', true);
+
+    try {
+      // Kalau hasil ini baru saja selesai, gunakan result lengkapnya
+      // sehingga grafik waktu per soal tetap ikut tercetak.
+      let result = null;
+      if (
+        state.lastResult &&
+        item.test_id &&
+        state.lastResult.testId === item.test_id
+      ) {
+        result = state.lastResult;
+      } else {
+        result = historyItemToResult(item);
+      }
+
+      const participant =
+        state.session?.username || 'Peserta';
+
+      const bytes = await buildPdf(
+        result,
+        participant
+      );
+
+      const blob = new Blob(
+        [bytes],
+        { type: 'application/pdf' }
+      );
+
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+
+      link.href = url;
+      link.download =
+        `hasil-${result.type}-paket-${result.package}-${new Date(
+          result.tanggal
+        ).toISOString().slice(0, 10)}.pdf`;
+
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+
+      setTimeout(
+        () => URL.revokeObjectURL(url),
+        1000
+      );
+
+      toast(
+        'PDF histori berhasil dibuat.',
+        'success'
+      );
+    } catch (error) {
+      console.error(
+        'History PDF error:',
+        error
+      );
+
+      toast(
+        `PDF histori gagal dibuat: ${error.message}`,
+        'warning',
+        5000
+      );
+    } finally {
+      busy(button, '', false);
+    }
   }
 
   async function goDashboard(message = '') {
