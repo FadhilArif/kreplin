@@ -118,16 +118,16 @@
 
   const $ = (id) => document.getElementById(id);
 
-  const views = {
-    landing: $('landingView'),
-    auth: $('authView'),
-    dashboard: $('dashboardView'),
-    instruction: $('instructionView'),
-    test: $('testView'),
-    result: $('resultView'),
-    history: $('historyView'),
-    showView('admin');
-  };
+const views = {
+  landing: $('landingView'),
+  auth: $('authView'),
+  dashboard: $('dashboardView'),
+  instruction: $('instructionView'),
+  test: $('testView'),
+  result: $('resultView'),
+  history: $('historyView'),
+  admin: $('adminView'),
+};
 
   const state = {
     session: null,
